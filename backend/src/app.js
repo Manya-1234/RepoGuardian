@@ -6,6 +6,10 @@ import { errorMiddleware } from "./middlewares/error.middleware.js";
 // Routes import
 import userRouter from "./routes/user.routes.js";
 import projectRouter from "./routes/project.routes.js";
+import teamOpportunityRouter from "./routes/teamOpportunity.routes.js";
+import teamApplicationRouter from "./routes/teamApplication.routes.js";
+import chatRouter from "./routes/chat.routes.js";
+import notificationRouter from "./routes/notification.routes.js";
 
 const app = express();
 
@@ -22,9 +26,12 @@ app.use(cookieParser());
 // Routes declaration
 app.use("/api/v1/users", userRouter);
 app.use("/api/v1/projects", projectRouter);
+app.use("/api/v1/opportunities", teamOpportunityRouter);
+app.use("/api/v1/applications", teamApplicationRouter);
+app.use("/api/v1/chat", chatRouter);
+app.use("/api/v1/notifications", notificationRouter);
 
 // Global error handling middleware (must be after all routes)
 app.use(errorMiddleware);
 
 export { app };
-
