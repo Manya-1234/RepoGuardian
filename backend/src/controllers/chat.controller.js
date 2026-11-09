@@ -7,6 +7,7 @@ import { Message } from "../models/message.model.js";
 import { Project } from "../models/project.model.js";
 import { User } from "../models/user.model.js";
 import { getIO } from "../socket/index.js";
+import { createAndEmitNotification } from "../utils/notification.helper.js";
 
 const getOrCreateDirectConversation = asyncHandler(async (req, res) => {
     const { recipientId } = req.params;
@@ -291,6 +292,51 @@ const sendMessageRest = asyncHandler(async (req, res) => {
         io.to(conversationId).emit("receive_message", populatedMessage);
     } catch {
         // Continue even if socket server is not yet attached in testing
+    }
+
+    // Trigger in-app notification for recipient(s)
+    const snippet =
+        content.length > 60
+            ? `${content.substring(0, 57)}...`
+            : content;
+
+    if (conversation.type === "direct") {
+        const recipientId = conversation.participants.find(
+            (p) => !p.equals(req.user._id)
+        );
+        if (recipientId) {
+            await createAndEmitNotification({
+                recipient: recipientId,
+                sender: req.user._id,
+                type: "new_message",
+                title: `New message from ${req.user.fullName}`,
+                message: snippet,
+                link: `/chat/${conversation._id}`
+            });
+        }
+    } else if (conversation.type === "workspace") {
+        const project = await Project.findById(conversation.workspace);
+        if (project) {
+            const otherMemberIds = [
+                project.owner,
+                ...project.members.map((m) => m.user)
+            ].filter((id) => id && !id.equals(req.user._id));
+
+            const uniqueMemberIds = [
+                ...new Set(otherMemberIds.map((id) => id.toString()))
+            ];
+
+            for (const memberId of uniqueMemberIds) {
+                await createAndEmitNotification({
+                    recipient: memberId,
+                    sender: req.user._id,
+                    type: "new_message",
+                    title: `New message in ${project.name}`,
+                    message: `${req.user.fullName}: ${snippet}`,
+                    link: `/chat/workspace/${project._id}`
+                });
+            }
+        }
     }
 
     return res
