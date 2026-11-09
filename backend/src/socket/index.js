@@ -4,6 +4,7 @@ import { User } from "../models/user.model.js";
 import { Conversation } from "../models/conversation.model.js";
 import { Message } from "../models/message.model.js";
 import { Project } from "../models/project.model.js";
+import { createAndEmitNotification } from "../utils/notification.helper.js";
 
 let io = null;
 
@@ -162,6 +163,51 @@ export const initSocket = (server) => {
 
                 // 3. Broadcast to all sockets in the conversation room
                 io.to(conversationId).emit("receive_message", populatedMessage);
+
+                // 4. Trigger in-app notification for recipient(s)
+                const snippet =
+                    content.length > 60
+                        ? `${content.substring(0, 57)}...`
+                        : content;
+
+                if (conversation.type === "direct") {
+                    const recipientId = conversation.participants.find(
+                        (p) => !p.equals(socket.user._id)
+                    );
+                    if (recipientId) {
+                        await createAndEmitNotification({
+                            recipient: recipientId,
+                            sender: socket.user._id,
+                            type: "new_message",
+                            title: `New message from ${socket.user.fullName}`,
+                            message: snippet,
+                            link: `/chat/${conversation._id}`
+                        });
+                    }
+                } else if (conversation.type === "workspace") {
+                    const project = await Project.findById(conversation.workspace);
+                    if (project) {
+                        const otherMemberIds = [
+                            project.owner,
+                            ...project.members.map((m) => m.user)
+                        ].filter((id) => id && !id.equals(socket.user._id));
+
+                        const uniqueMemberIds = [
+                            ...new Set(otherMemberIds.map((id) => id.toString()))
+                        ];
+
+                        for (const memberId of uniqueMemberIds) {
+                            await createAndEmitNotification({
+                                recipient: memberId,
+                                sender: socket.user._id,
+                                type: "new_message",
+                                title: `New message in ${project.name}`,
+                                message: `${socket.user.fullName}: ${snippet}`,
+                                link: `/chat/workspace/${project._id}`
+                            });
+                        }
+                    }
+                }
             } catch (err) {
                 socket.emit("chat_error", err.message);
             }

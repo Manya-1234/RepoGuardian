@@ -23,7 +23,10 @@ const notificationSchema = new Schema(
                 "workspace_invitation",
                 "workspace_invitation_accepted",
                 "workspace_invitation_declined",
-                "new_message"
+                "new_message",
+                "task_assigned",
+                "task_reassigned",
+                "task_status_changed"
             ],
             required: true
         },
