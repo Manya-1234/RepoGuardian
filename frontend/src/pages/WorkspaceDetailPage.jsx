@@ -1,0 +1,389 @@
+import React, { useState, useEffect } from "react";
+import { useParams, Link } from "react-router-dom";
+import {
+  LayoutGrid,
+  CheckCircle2,
+  MessageSquare,
+  Github,
+  Users,
+  UserPlus,
+  Shield,
+  ArrowLeft,
+  Mail,
+  Trash2,
+} from "lucide-react";
+import { projectApi } from "../api/project.api";
+import { chatApi } from "../api/chat.api";
+import { useAuth } from "../context/AuthContext";
+import { KanbanBoard } from "../components/kanban/KanbanBoard";
+import { ChatWindow } from "../components/chat/ChatWindow";
+import { GitHubExplorer } from "../components/github/GitHubExplorer";
+import { Modal } from "../components/common/Modal";
+import { Badge } from "../components/common/Badge";
+import { LoadingSpinner } from "../components/common/LoadingSpinner";
+
+export const WorkspaceDetailPage = () => {
+  const { id } = useParams();
+  const { user: currentUser } = useAuth();
+
+  const [workspace, setWorkspace] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState("kanban"); // 'kanban' | 'chat' | 'github' | 'members'
+  const [chatConversationId, setChatConversationId] = useState(null);
+
+  // Invite Modal State
+  const [isInviteOpen, setIsInviteOpen] = useState(false);
+  const [inviteUsername, setInviteUsername] = useState("");
+  const [inviteRole, setInviteRole] = useState("member");
+  const [inviteLoading, setInviteLoading] = useState(false);
+  const [inviteError, setInviteError] = useState("");
+  const [inviteSuccess, setInviteSuccess] = useState(false);
+
+  const fetchWorkspace = async () => {
+    try {
+      setLoading(true);
+      const res = await projectApi.getProjectById(id);
+      setWorkspace(res.data);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (id) {
+      fetchWorkspace();
+    }
+  }, [id]);
+
+  // Load workspace conversation for the Chat tab
+  useEffect(() => {
+    if (id && activeTab === "chat") {
+      const loadChat = async () => {
+        try {
+          const res = await chatApi.getWorkspaceChat(id);
+          setChatConversationId(res.data?._id);
+        } catch (err) {
+          console.error(err);
+        }
+      };
+      loadChat();
+    }
+  }, [id, activeTab]);
+
+  const isOwner =
+    workspace?.owner?._id === currentUser?._id ||
+    workspace?.owner === currentUser?._id;
+
+  const isMember =
+    isOwner ||
+    workspace?.members?.some((m) => {
+      const uId = m.user?._id || m.user;
+      return uId === currentUser?._id;
+    });
+
+  const ownerId = (workspace?.owner?._id || workspace?.owner)?.toString();
+  const otherMembers = (workspace?.members || []).filter((m) => {
+    const mId = (m.user?._id || m.user)?.toString();
+    return mId && mId !== ownerId;
+  });
+
+  const allMembers = workspace
+    ? [
+        {
+          user: workspace.owner,
+          role: "Owner",
+        },
+        ...otherMembers.map((m) => ({
+          user: m.user,
+          role: m.role || "Member",
+        })),
+      ]
+    : [];
+
+  const handleSendInvite = async (e) => {
+    e.preventDefault();
+    setInviteLoading(true);
+    setInviteError("");
+
+    try {
+      await projectApi.inviteMember(id, {
+        emailOrUsername: inviteUsername.trim(),
+        username: inviteUsername.trim(),
+        role: inviteRole,
+      });
+
+      setInviteSuccess(true);
+      setTimeout(() => {
+        setInviteSuccess(false);
+        setIsInviteOpen(false);
+        setInviteUsername("");
+        fetchWorkspace();
+      }, 1200);
+    } catch (err) {
+      setInviteError(err.message || "Failed to invite member");
+    } finally {
+      setInviteLoading(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-[70vh] flex items-center justify-center">
+        <LoadingSpinner size="lg" />
+      </div>
+    );
+  }
+
+  if (!workspace) {
+    return (
+      <div className="max-w-4xl mx-auto py-16 text-center text-slate-400">
+        Workspace not found or unauthorized.
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+      {/* Top Breadcrumb & Actions */}
+      <div className="flex items-center justify-between">
+        <Link
+          to="/workspaces"
+          className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-400 hover:text-slate-200 transition"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          <span>Back to Workspaces</span>
+        </Link>
+
+        {isOwner && (
+          <button
+            onClick={() => setIsInviteOpen(true)}
+            className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition shadow-md shadow-indigo-600/30"
+          >
+            <UserPlus className="w-4 h-4" />
+            <span>Invite Member</span>
+          </button>
+        )}
+      </div>
+
+      {/* Workspace Header Card */}
+      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-3">
+            <h1 className="text-xl sm:text-2xl font-bold text-slate-100">
+              {workspace.name}
+            </h1>
+            <Badge variant="indigo" size="xs">
+              {allMembers.length} {allMembers.length === 1 ? "Member" : "Members"}
+            </Badge>
+          </div>
+          <p className="text-xs sm:text-sm text-slate-400 mt-1 max-w-2xl">
+            {workspace.description || "No workspace description."}
+          </p>
+        </div>
+
+        {workspace.githubRepo?.owner && (
+          <div className="flex items-center gap-2 px-3.5 py-2 rounded-2xl bg-slate-950 border border-slate-800 text-xs text-slate-300">
+            <Github className="w-4 h-4 text-indigo-400" />
+            <span className="font-mono">
+              {workspace.githubRepo.owner}/{workspace.githubRepo.repo}
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* Tabs Bar */}
+      <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
+        {[
+          { id: "kanban", name: "Kanban Tasks", icon: CheckCircle2 },
+          { id: "chat", name: "Team Chat", icon: MessageSquare },
+          { id: "github", name: "GitHub Explorer", icon: Github },
+          { id: "members", name: "Team Members", icon: Users },
+        ].map((tab) => {
+          const Icon = tab.icon;
+          const isActive = activeTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition ${
+                isActive
+                  ? "bg-indigo-600/20 text-indigo-400 border border-indigo-500/40"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              <Icon className="w-4 h-4" />
+              <span>{tab.name}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Tab Panels */}
+      {activeTab === "kanban" && (
+        <KanbanBoard
+          workspaceId={workspace._id}
+          members={allMembers}
+          isMember={isMember}
+        />
+      )}
+
+      {activeTab === "chat" && (
+        <div className="max-w-4xl mx-auto">
+          {chatConversationId ? (
+            <ChatWindow
+              conversationId={chatConversationId}
+              title={`${workspace.name} Channel`}
+              placeholder={`Send message to #${workspace.name.toLowerCase()}...`}
+            />
+          ) : (
+            <div className="py-20 flex justify-center">
+              <LoadingSpinner size="md" />
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeTab === "github" && (
+        <GitHubExplorer
+          workspace={workspace}
+          isOwner={isOwner}
+          onWorkspaceUpdated={(updated) => setWorkspace(updated)}
+        />
+      )}
+
+      {activeTab === "members" && (
+        <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wider">
+              Workspace Members ({allMembers.length})
+            </h3>
+            {isOwner && (
+              <button
+                onClick={() => setIsInviteOpen(true)}
+                className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-1.5"
+              >
+                <UserPlus className="w-3.5 h-3.5" /> Invite Teammate
+              </button>
+            )}
+          </div>
+
+          <div className="divide-y divide-slate-800/80">
+            {allMembers.map((m, idx) => {
+              const u = m.user || {};
+              return (
+                <div
+                  key={u._id || idx}
+                  className="py-3.5 flex items-center justify-between gap-4"
+                >
+                  <div className="flex items-center gap-3">
+                    <img
+                      src={
+                        u.avatar ||
+                        `https://api.dicebear.com/7.x/identicon/svg?seed=${u.username || "user"}`
+                      }
+                      alt={u.username}
+                      className="w-10 h-10 rounded-xl object-cover border border-slate-700"
+                    />
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <Link
+                          to={`/profile/${u.username}`}
+                          className="text-sm font-semibold text-slate-100 hover:text-indigo-400 transition"
+                        >
+                          {u.fullName || u.username}
+                        </Link>
+                        <Badge
+                          variant={m.role === "Owner" ? "purple" : "indigo"}
+                          size="xs"
+                        >
+                          {m.role}
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-slate-400">@{u.username}</p>
+                    </div>
+                  </div>
+
+                  <Link
+                    to={`/profile/${u.username}`}
+                    className="px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-300 hover:text-white transition"
+                  >
+                    View Profile
+                  </Link>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Invite Member Modal */}
+      <Modal
+        isOpen={isInviteOpen}
+        onClose={() => setIsInviteOpen(false)}
+        title="Invite Teammate to Workspace"
+      >
+        <form onSubmit={handleSendInvite} className="space-y-4">
+          {inviteError && (
+            <div className="p-3 bg-rose-950/40 border border-rose-800 text-rose-300 text-xs rounded-xl">
+              {inviteError}
+            </div>
+          )}
+
+          {inviteSuccess && (
+            <div className="p-3 bg-emerald-950/40 border border-emerald-800 text-emerald-300 text-xs rounded-xl">
+              Invitation sent successfully!
+            </div>
+          )}
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 mb-1">
+              Username or Email
+            </label>
+            <input
+              type="text"
+              required
+              value={inviteUsername}
+              onChange={(e) => setInviteUsername(e.target.value)}
+              placeholder="e.g. johndoe"
+              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 mb-1">
+              Workspace Role
+            </label>
+            <select
+              value={inviteRole}
+              onChange={(e) => setInviteRole(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+            >
+              <option value="member">Member (Developer)</option>
+              <option value="admin">Admin (Lead / Maintainer)</option>
+              <option value="viewer">Viewer (Read-only)</option>
+            </select>
+          </div>
+
+          <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+            <button
+              type="button"
+              onClick={() => setIsInviteOpen(false)}
+              className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-slate-200"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={inviteLoading}
+              className="flex items-center gap-2 px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition disabled:opacity-50"
+            >
+              {inviteLoading ? <LoadingSpinner size="sm" /> : "Send Invitation"}
+            </button>
+          </div>
+        </form>
+      </Modal>
+    </div>
+  );
+};

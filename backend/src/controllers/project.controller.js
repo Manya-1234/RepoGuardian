@@ -4,6 +4,8 @@ import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { Project } from "../models/project.model.js";
 import { User } from "../models/user.model.js";
+import { WorkspaceInvitation } from "../models/workspaceInvitation.model.js";
+import { createAndEmitNotification } from "../utils/notification.helper.js";
 
 const createProject = asyncHandler(async (req, res) => {
     const { name, description, githubRepo } = req.body;
@@ -16,12 +18,7 @@ const createProject = asyncHandler(async (req, res) => {
         name: name.trim(),
         description: description?.trim() || "",
         owner: req.user._id,
-        members: [
-            {
-                user: req.user._id,
-                role: "admin"
-            }
-        ],
+        members: [],
         githubRepo: {
             url: githubRepo?.url?.trim() || "",
             owner: githubRepo?.owner?.trim() || "",
@@ -50,7 +47,7 @@ const getUserProjects = asyncHandler(async (req, res) => {
 
     return res
         .status(200)
-        .json(new ApiResponse(200, projects, "Projects fetched successfully"));
+        .json(new ApiResponse(200, { projects }, "Projects fetched successfully"));
 });
 
 const getProjectById = asyncHandler(async (req, res) => {
@@ -120,7 +117,7 @@ const updateProject = asyncHandler(async (req, res) => {
         project.githubRepo = {
             url: githubRepo.url?.trim() || project.githubRepo?.url || "",
             owner: githubRepo.owner?.trim() || project.githubRepo?.owner || "",
-            name: githubRepo.name?.trim() || project.githubRepo?.name || ""
+            name: (githubRepo.name || githubRepo.repo)?.trim() || project.githubRepo?.name || ""
         };
     }
 
@@ -135,17 +132,21 @@ const updateProject = asyncHandler(async (req, res) => {
         .json(new ApiResponse(200, updatedProject, "Project updated successfully"));
 });
 
-const addProjectMember = asyncHandler(async (req, res) => {
+const inviteWorkspaceMember = asyncHandler(async (req, res) => {
     const { projectId } = req.params;
-    const { emailOrUsername, role = "member" } = req.body;
+    let { emailOrUsername, username, email, role = "member", message = "" } = req.body;
+    const targetUserIdentifier = emailOrUsername || username || email;
 
     if (!mongoose.isValidObjectId(projectId)) {
         throw new ApiError(400, "Invalid project ID format");
     }
 
-    if (!emailOrUsername || emailOrUsername.trim() === "") {
-        throw new ApiError(400, "Username or email of the member is required");
+    if (!targetUserIdentifier || targetUserIdentifier.trim() === "") {
+        throw new ApiError(400, "Username or email of the friend/member is required");
     }
+
+    if (role === "developer") role = "member";
+    if (role === "lead" || role === "maintainer") role = "admin";
 
     if (!["admin", "member", "viewer"].includes(role)) {
         throw new ApiError(400, "Role must be 'admin', 'member', or 'viewer'");
@@ -163,46 +164,81 @@ const addProjectMember = asyncHandler(async (req, res) => {
     );
 
     if (!isOwner && !isAdmin) {
-        throw new ApiError(403, "Only project owners or admins can add members");
+        throw new ApiError(403, "Only project owners or admins can invite members");
     }
 
-    const userToAdd = await User.findOne({
+    const userToInvite = await User.findOne({
         $or: [
-            { username: emailOrUsername.toLowerCase().trim() },
-            { email: emailOrUsername.toLowerCase().trim() }
+            { username: targetUserIdentifier.toLowerCase().trim() },
+            { email: targetUserIdentifier.toLowerCase().trim() }
         ]
     });
 
-    if (!userToAdd) {
+    if (!userToInvite) {
         throw new ApiError(404, "User with this username or email not found");
     }
 
+    if (userToInvite._id.equals(req.user._id)) {
+        throw new ApiError(400, "You cannot invite yourself to the workspace");
+    }
+
     const alreadyMember = project.members.some((m) =>
-        m.user.equals(userToAdd._id)
+        m.user.equals(userToInvite._id)
     );
 
     if (alreadyMember) {
-        throw new ApiError(409, "User is already a member of this project");
+        throw new ApiError(409, "User is already a member of this workspace");
     }
 
-    project.members.push({
-        user: userToAdd._id,
-        role,
-        joinedAt: new Date()
+    // Check if an invitation is already pending
+    const existingInvitation = await WorkspaceInvitation.findOne({
+        workspace: projectId,
+        invitee: userToInvite._id,
+        status: "pending"
     });
 
-    await project.save();
+    if (existingInvitation) {
+        throw new ApiError(
+            409,
+            "An invitation has already been sent to this user and is pending their response"
+        );
+    }
 
-    const updatedProject = await Project.findById(projectId)
-        .populate("owner", "username fullName email avatar")
-        .populate("members.user", "username fullName email avatar");
+    const invitation = await WorkspaceInvitation.create({
+        workspace: projectId,
+        inviter: req.user._id,
+        invitee: userToInvite._id,
+        role,
+        message: message.trim(),
+        status: "pending"
+    });
+
+    const populatedInvitation = await WorkspaceInvitation.findById(invitation._id)
+        .populate("workspace", "name description githubRepo")
+        .populate("inviter", "username fullName email avatar")
+        .populate("invitee", "username fullName email avatar");
+
+    await createAndEmitNotification({
+        recipient: userToInvite._id,
+        sender: req.user._id,
+        type: "workspace_invitation",
+        title: "Workspace Invitation",
+        message: `${req.user.fullName} (@${req.user.username}) invited you to join workspace "${project.name}" as ${role}`,
+        link: "/workspaces"
+    });
 
     return res
-        .status(200)
+        .status(201)
         .json(
-            new ApiResponse(200, updatedProject, "Member added successfully")
+            new ApiResponse(
+                201,
+                populatedInvitation,
+                `Workspace invitation sent to ${userToInvite.username}. They can accept or decline.`
+            )
         );
 });
+
+const addProjectMember = inviteWorkspaceMember;
 
 const removeProjectMember = asyncHandler(async (req, res) => {
     const { projectId, userId } = req.params;
@@ -281,12 +317,191 @@ const deleteProject = asyncHandler(async (req, res) => {
         .json(new ApiResponse(200, {}, "Project deleted successfully"));
 });
 
+const respondToWorkspaceInvitation = asyncHandler(async (req, res) => {
+    const { invitationId } = req.params;
+    let { action, response, status } = req.body;
+    let resolvedAction = action || response || status;
+    if (resolvedAction === "accepted") resolvedAction = "accept";
+    if (resolvedAction === "declined") resolvedAction = "decline";
+
+    if (!mongoose.isValidObjectId(invitationId)) {
+        throw new ApiError(400, "Invalid invitation ID format");
+    }
+
+    if (!["accept", "decline", "withdraw"].includes(resolvedAction)) {
+        throw new ApiError(
+            400,
+            "Invalid action. Must be 'accept', 'decline', or 'withdraw'"
+        );
+    }
+
+    const invitation = await WorkspaceInvitation.findById(invitationId).populate(
+        "workspace"
+    );
+
+    if (!invitation) {
+        throw new ApiError(404, "Workspace invitation not found");
+    }
+
+    if (invitation.status !== "pending") {
+        throw new ApiError(
+            400,
+            `Cannot respond to an invitation that is already ${invitation.status}`
+        );
+    }
+
+    const isInvitee = invitation.invitee.equals(req.user._id);
+    const isInviter = invitation.inviter.equals(req.user._id);
+
+    if (resolvedAction === "accept" || resolvedAction === "decline") {
+        if (!isInvitee) {
+            throw new ApiError(
+                403,
+                "Only the invited user can accept or decline this workspace invitation"
+            );
+        }
+    } else if (resolvedAction === "withdraw") {
+        if (!isInviter) {
+            throw new ApiError(
+                403,
+                "Only the inviter can withdraw this invitation"
+            );
+        }
+    }
+
+    const newStatus =
+        resolvedAction === "accept"
+            ? "accepted"
+            : resolvedAction === "decline"
+            ? "declined"
+            : "withdrawn";
+
+    invitation.status = newStatus;
+    invitation.respondedAt = new Date();
+    await invitation.save();
+
+    // If accepted, add invitee to project members
+    if (newStatus === "accepted") {
+        const project = await Project.findById(invitation.workspace._id);
+        if (project) {
+            const alreadyMember = project.members.some((m) =>
+                m.user.equals(invitation.invitee)
+            );
+
+            if (!alreadyMember) {
+                project.members.push({
+                    user: invitation.invitee,
+                    role: invitation.role || "member",
+                    joinedAt: new Date()
+                });
+                await project.save();
+            }
+        }
+    }
+
+    const updated = await WorkspaceInvitation.findById(invitation._id)
+        .populate("workspace", "name description githubRepo")
+        .populate("inviter", "username fullName email")
+        .populate("invitee", "username fullName email");
+
+    await createAndEmitNotification({
+        recipient: invitation.inviter,
+        sender: req.user._id,
+        type: action === "accept" ? "workspace_invitation_accepted" : "workspace_invitation_declined",
+        title: `Workspace Invitation ${newStatus}`,
+        message: `${req.user.fullName} (@${req.user.username}) has ${newStatus} your invitation to join "${invitation.workspace.name}"`,
+        link: `/workspaces/${invitation.workspace._id}`
+    });
+
+    return res
+        .status(200)
+        .json(
+            new ApiResponse(
+                200,
+                updated,
+                `Workspace invitation ${newStatus} successfully`
+            )
+        );
+});
+
+const getMyWorkspaceInvitations = asyncHandler(async (req, res) => {
+    const { status = "pending" } = req.query;
+
+    const query = { invitee: req.user._id };
+    if (status && status !== "all") {
+        query.status = status;
+    }
+
+    const invitations = await WorkspaceInvitation.find(query)
+        .populate("workspace", "name description githubRepo status")
+        .populate("inviter", "username fullName email avatar headline")
+        .sort({ createdAt: -1 });
+
+    return res
+        .status(200)
+        .json(
+            new ApiResponse(
+                200,
+                invitations,
+                "Your workspace invitations fetched successfully"
+            )
+        );
+});
+
+const getWorkspacePendingInvitations = asyncHandler(async (req, res) => {
+    const { projectId } = req.params;
+
+    if (!mongoose.isValidObjectId(projectId)) {
+        throw new ApiError(400, "Invalid project ID format");
+    }
+
+    const project = await Project.findById(projectId);
+    if (!project) {
+        throw new ApiError(404, "Project not found");
+    }
+
+    const isOwner = project.owner.equals(req.user._id);
+    const isAdmin = project.members.some(
+        (m) => m.user.equals(req.user._id) && m.role === "admin"
+    );
+
+    if (!isOwner && !isAdmin) {
+        throw new ApiError(
+            403,
+            "Only project owners or admins can view invitations"
+        );
+    }
+
+    const invitations = await WorkspaceInvitation.find({
+        workspace: projectId,
+        status: "pending"
+    })
+        .populate("invitee", "username fullName email avatar headline")
+        .populate("inviter", "username fullName email avatar")
+        .sort({ createdAt: -1 });
+
+    return res
+        .status(200)
+        .json(
+            new ApiResponse(
+                200,
+                invitations,
+                "Workspace pending invitations fetched successfully"
+            )
+        );
+});
+
 export {
     createProject,
     getUserProjects,
     getProjectById,
     updateProject,
+    inviteWorkspaceMember,
     addProjectMember,
     removeProjectMember,
-    deleteProject
+    deleteProject,
+    respondToWorkspaceInvitation,
+    getMyWorkspaceInvitations,
+    getWorkspacePendingInvitations
 };
+
