@@ -9,10 +9,10 @@ import { User } from "../models/user.model.js";
 import { createAndEmitNotification } from "../utils/notification.helper.js";
 
 const applyToOpportunity = asyncHandler(async (req, res) => {
-    const { opportunityId } = req.params;
+    const opportunityId = req.params.opportunityId || req.body.opportunityId;
     const { role = "Team Member", message = "" } = req.body;
 
-    if (!mongoose.isValidObjectId(opportunityId)) {
+    if (!opportunityId || !mongoose.isValidObjectId(opportunityId)) {
         throw new ApiError(400, "Invalid opportunity ID format");
     }
 
@@ -190,13 +190,16 @@ const inviteDeveloper = asyncHandler(async (req, res) => {
 
 const respondToApplication = asyncHandler(async (req, res) => {
     const { applicationId } = req.params;
-    const { action } = req.body;
+    let { action, status, response } = req.body;
+    let resolvedAction = action || status || response;
+    if (resolvedAction === "accepted") resolvedAction = "accept";
+    if (resolvedAction === "declined" || resolvedAction === "rejected") resolvedAction = "reject";
 
     if (!mongoose.isValidObjectId(applicationId)) {
         throw new ApiError(400, "Invalid application ID format");
     }
 
-    if (!["accept", "reject", "withdraw"].includes(action)) {
+    if (!["accept", "reject", "withdraw"].includes(resolvedAction)) {
         throw new ApiError(
             400,
             "Invalid action. Must be 'accept', 'reject', or 'withdraw'"

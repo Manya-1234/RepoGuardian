@@ -55,6 +55,34 @@ const projectSchema = new Schema(
                 type: String,
                 trim: true,
                 default: ""
+            },
+            defaultBranch: {
+                type: String,
+                default: "main"
+            },
+            language: {
+                type: String,
+                default: ""
+            },
+            description: {
+                type: String,
+                default: ""
+            },
+            stars: {
+                type: Number,
+                default: 0
+            },
+            forks: {
+                type: Number,
+                default: 0
+            },
+            openIssues: {
+                type: Number,
+                default: 0
+            },
+            isLinked: {
+                type: Boolean,
+                default: false
             }
         },
         status: {

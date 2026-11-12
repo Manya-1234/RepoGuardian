@@ -12,23 +12,28 @@ import { createAndEmitNotification } from "../utils/notification.helper.js";
 const getOrCreateDirectConversation = asyncHandler(async (req, res) => {
     const { recipientId } = req.params;
 
-    if (!mongoose.isValidObjectId(recipientId)) {
-        throw new ApiError(400, "Invalid recipient ID format");
+    let targetUser = null;
+    if (mongoose.isValidObjectId(recipientId)) {
+        targetUser = await User.findById(recipientId);
+    }
+    if (!targetUser) {
+        targetUser = await User.findOne({ username: recipientId.toLowerCase().trim() });
     }
 
-    if (req.user._id.equals(recipientId)) {
+    if (!targetUser) {
+        throw new ApiError(404, "Recipient user not found");
+    }
+
+    if (req.user._id.equals(targetUser._id)) {
         throw new ApiError(400, "You cannot start a direct chat with yourself");
     }
 
-    const recipient = await User.findById(recipientId);
-    if (!recipient) {
-        throw new ApiError(404, "Recipient user not found");
-    }
+    const actualRecipientId = targetUser._id;
 
     // Find existing direct conversation between these two users
     let conversation = await Conversation.findOne({
         type: "direct",
-        participants: { $all: [req.user._id, recipientId], $size: 2 }
+        participants: { $all: [req.user._id, actualRecipientId], $size: 2 }
     })
         .populate("participants", "username fullName email avatar headline")
         .populate({
@@ -39,7 +44,7 @@ const getOrCreateDirectConversation = asyncHandler(async (req, res) => {
     if (!conversation) {
         const newConv = await Conversation.create({
             type: "direct",
-            participants: [req.user._id, recipientId]
+            participants: [req.user._id, actualRecipientId]
         });
 
         conversation = await Conversation.findById(newConv._id)
@@ -153,7 +158,7 @@ const getUserConversations = asyncHandler(async (req, res) => {
         .json(
             new ApiResponse(
                 200,
-                allConversations,
+                { conversations: allConversations },
                 "User conversations fetched successfully"
             )
         );

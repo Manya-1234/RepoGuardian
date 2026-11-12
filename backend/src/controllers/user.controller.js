@@ -280,15 +280,27 @@ const updateUserProfile = asyncHandler(async (req, res) => {
         };
     }
 
-    if (availability !== undefined && typeof availability === "object") {
-        const validStatuses = ["actively_looking", "open_to_offers", "not_available"];
-        if (availability.status && !validStatuses.includes(availability.status)) {
-            throw new ApiError(400, "Invalid availability status. Must be actively_looking, open_to_offers, or not_available");
+    if (availability !== undefined) {
+        if (typeof availability === "string") {
+            const mappedStatus =
+                availability === "available" ? "actively_looking" :
+                availability === "busy" ? "open_to_offers" :
+                availability === "not_available" ? "not_available" :
+                ["actively_looking", "open_to_offers", "not_available"].includes(availability) ? availability : "actively_looking";
+            user.availability = {
+                status: mappedStatus,
+                hoursPerWeek: user.availability?.hoursPerWeek || 10
+            };
+        } else if (typeof availability === "object" && availability !== null) {
+            const validStatuses = ["actively_looking", "open_to_offers", "not_available"];
+            let st = availability.status;
+            if (st === "available") st = "actively_looking";
+            if (st === "busy") st = "open_to_offers";
+            user.availability = {
+                status: (st && validStatuses.includes(st)) ? st : (user.availability?.status || "actively_looking"),
+                hoursPerWeek: availability.hoursPerWeek !== undefined ? Number(availability.hoursPerWeek) : (user.availability?.hoursPerWeek || 10)
+            };
         }
-        user.availability = {
-            status: availability.status || user.availability?.status || "actively_looking",
-            hoursPerWeek: availability.hoursPerWeek !== undefined ? Number(availability.hoursPerWeek) : (user.availability?.hoursPerWeek || 10)
-        };
     }
 
     await user.save({ validateBeforeSave: false });
@@ -301,13 +313,26 @@ const updateUserProfile = asyncHandler(async (req, res) => {
 });
 
 const getDeveloperProfile = asyncHandler(async (req, res) => {
-    const { userId } = req.params;
+    const { userId, identifier } = req.params;
+    const target = identifier || userId;
 
-    if (!mongoose.isValidObjectId(userId)) {
-        throw new ApiError(400, "Invalid user ID format");
+    if (!target) {
+        throw new ApiError(400, "User identifier or ID is required");
     }
 
-    const developer = await User.findById(userId).select("-password -refreshToken");
+    let query = {};
+    if (mongoose.isValidObjectId(target)) {
+        query = {
+            $or: [
+                { _id: target },
+                { username: target.toLowerCase().trim() }
+            ]
+        };
+    } else {
+        query = { username: target.toLowerCase().trim() };
+    }
+
+    const developer = await User.findOne(query).select("-password -refreshToken");
 
     if (!developer) {
         throw new ApiError(404, "Developer not found");
