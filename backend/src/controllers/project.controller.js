@@ -18,12 +18,7 @@ const createProject = asyncHandler(async (req, res) => {
         name: name.trim(),
         description: description?.trim() || "",
         owner: req.user._id,
-        members: [
-            {
-                user: req.user._id,
-                role: "admin"
-            }
-        ],
+        members: [],
         githubRepo: {
             url: githubRepo?.url?.trim() || "",
             owner: githubRepo?.owner?.trim() || "",
@@ -52,7 +47,7 @@ const getUserProjects = asyncHandler(async (req, res) => {
 
     return res
         .status(200)
-        .json(new ApiResponse(200, projects, "Projects fetched successfully"));
+        .json(new ApiResponse(200, { projects }, "Projects fetched successfully"));
 });
 
 const getProjectById = asyncHandler(async (req, res) => {
@@ -122,7 +117,7 @@ const updateProject = asyncHandler(async (req, res) => {
         project.githubRepo = {
             url: githubRepo.url?.trim() || project.githubRepo?.url || "",
             owner: githubRepo.owner?.trim() || project.githubRepo?.owner || "",
-            name: githubRepo.name?.trim() || project.githubRepo?.name || ""
+            name: (githubRepo.name || githubRepo.repo)?.trim() || project.githubRepo?.name || ""
         };
     }
 
@@ -139,15 +134,19 @@ const updateProject = asyncHandler(async (req, res) => {
 
 const inviteWorkspaceMember = asyncHandler(async (req, res) => {
     const { projectId } = req.params;
-    const { emailOrUsername, role = "member", message = "" } = req.body;
+    let { emailOrUsername, username, email, role = "member", message = "" } = req.body;
+    const targetUserIdentifier = emailOrUsername || username || email;
 
     if (!mongoose.isValidObjectId(projectId)) {
         throw new ApiError(400, "Invalid project ID format");
     }
 
-    if (!emailOrUsername || emailOrUsername.trim() === "") {
+    if (!targetUserIdentifier || targetUserIdentifier.trim() === "") {
         throw new ApiError(400, "Username or email of the friend/member is required");
     }
+
+    if (role === "developer") role = "member";
+    if (role === "lead" || role === "maintainer") role = "admin";
 
     if (!["admin", "member", "viewer"].includes(role)) {
         throw new ApiError(400, "Role must be 'admin', 'member', or 'viewer'");
@@ -170,8 +169,8 @@ const inviteWorkspaceMember = asyncHandler(async (req, res) => {
 
     const userToInvite = await User.findOne({
         $or: [
-            { username: emailOrUsername.toLowerCase().trim() },
-            { email: emailOrUsername.toLowerCase().trim() }
+            { username: targetUserIdentifier.toLowerCase().trim() },
+            { email: targetUserIdentifier.toLowerCase().trim() }
         ]
     });
 
@@ -225,7 +224,7 @@ const inviteWorkspaceMember = asyncHandler(async (req, res) => {
         type: "workspace_invitation",
         title: "Workspace Invitation",
         message: `${req.user.fullName} (@${req.user.username}) invited you to join workspace "${project.name}" as ${role}`,
-        link: `/projects/${project._id}`
+        link: "/workspaces"
     });
 
     return res
@@ -320,13 +319,16 @@ const deleteProject = asyncHandler(async (req, res) => {
 
 const respondToWorkspaceInvitation = asyncHandler(async (req, res) => {
     const { invitationId } = req.params;
-    const { action } = req.body;
+    let { action, response, status } = req.body;
+    let resolvedAction = action || response || status;
+    if (resolvedAction === "accepted") resolvedAction = "accept";
+    if (resolvedAction === "declined") resolvedAction = "decline";
 
     if (!mongoose.isValidObjectId(invitationId)) {
         throw new ApiError(400, "Invalid invitation ID format");
     }
 
-    if (!["accept", "decline", "withdraw"].includes(action)) {
+    if (!["accept", "decline", "withdraw"].includes(resolvedAction)) {
         throw new ApiError(
             400,
             "Invalid action. Must be 'accept', 'decline', or 'withdraw'"
@@ -351,14 +353,14 @@ const respondToWorkspaceInvitation = asyncHandler(async (req, res) => {
     const isInvitee = invitation.invitee.equals(req.user._id);
     const isInviter = invitation.inviter.equals(req.user._id);
 
-    if (action === "accept" || action === "decline") {
+    if (resolvedAction === "accept" || resolvedAction === "decline") {
         if (!isInvitee) {
             throw new ApiError(
                 403,
                 "Only the invited user can accept or decline this workspace invitation"
             );
         }
-    } else if (action === "withdraw") {
+    } else if (resolvedAction === "withdraw") {
         if (!isInviter) {
             throw new ApiError(
                 403,
@@ -368,9 +370,9 @@ const respondToWorkspaceInvitation = asyncHandler(async (req, res) => {
     }
 
     const newStatus =
-        action === "accept"
+        resolvedAction === "accept"
             ? "accepted"
-            : action === "decline"
+            : resolvedAction === "decline"
             ? "declined"
             : "withdrawn";
 
@@ -408,7 +410,7 @@ const respondToWorkspaceInvitation = asyncHandler(async (req, res) => {
         type: action === "accept" ? "workspace_invitation_accepted" : "workspace_invitation_declined",
         title: `Workspace Invitation ${newStatus}`,
         message: `${req.user.fullName} (@${req.user.username}) has ${newStatus} your invitation to join "${invitation.workspace.name}"`,
-        link: `/projects/${invitation.workspace._id}`
+        link: `/workspaces/${invitation.workspace._id}`
     });
 
     return res

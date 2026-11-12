@@ -5,16 +5,19 @@ import { ApiResponse } from "../utils/ApiResponse.js";
 import { TeamOpportunity } from "../models/teamOpportunity.model.js";
 import { Project } from "../models/project.model.js";
 import { User } from "../models/user.model.js";
+import { TeamApplication } from "../models/teamApplication.model.js";
 import { calculateDeveloperMatch } from "../utils/matchmaking.js";
 
 const createOpportunity = asyncHandler(async (req, res) => {
-    const {
+    let {
         title,
         description,
         workspace,
         openRoles = [],
         skillsRequired = [],
-        expectedCommitment = 10
+        requiredSkills = [],
+        expectedCommitment = 10,
+        experienceLevel = "intermediate"
     } = req.body;
 
     if (!title || title.trim() === "") {
@@ -25,36 +28,65 @@ const createOpportunity = asyncHandler(async (req, res) => {
         throw new ApiError(400, "Opportunity description is required");
     }
 
-    let linkedWorkspace = null;
-    if (workspace) {
-        if (!mongoose.isValidObjectId(workspace)) {
-            throw new ApiError(400, "Invalid workspace ID format");
-        }
-
-        const project = await Project.findById(workspace);
-        if (!project) {
-            throw new ApiError(404, "Linked workspace not found");
-        }
-
-        const isOwner = project.owner.equals(req.user._id);
-        const isAdmin = project.members.some(
-            (m) => m.user.equals(req.user._id) && m.role === "admin"
-        );
-
-        if (!isOwner && !isAdmin) {
-            throw new ApiError(
-                403,
-                "Only workspace owners or admins can link an opportunity to this workspace"
-            );
-        }
-
-        linkedWorkspace = project._id;
+    if (!workspace) {
+        throw new ApiError(400, "A linked workspace is required to post a team opportunity");
     }
 
-    // Consolidate skills from all openRoles and top-level skillsRequired
+    if (!mongoose.isValidObjectId(workspace)) {
+        throw new ApiError(400, "Invalid workspace ID format");
+    }
+
+    const project = await Project.findById(workspace);
+    if (!project) {
+        throw new ApiError(404, "Linked workspace not found");
+    }
+
+    const isOwner = project.owner.equals(req.user._id);
+    const isAdmin = project.members.some(
+        (m) => m.user.equals(req.user._id) && m.role === "admin"
+    );
+
+    if (!isOwner && !isAdmin) {
+        throw new ApiError(
+            403,
+            "Only workspace owners or admins can post opportunities for this workspace"
+        );
+    }
+
+    const linkedWorkspace = project._id;
+
+    // Consolidate skills from all openRoles, skillsRequired, and requiredSkills
     const allSkills = new Set();
-    if (Array.isArray(skillsRequired)) {
-        skillsRequired.forEach((s) => s && allSkills.add(s.trim()));
+    const rawSkills =
+        Array.isArray(skillsRequired) && skillsRequired.length > 0
+            ? skillsRequired
+            : Array.isArray(requiredSkills)
+            ? requiredSkills
+            : [];
+
+    rawSkills.forEach((s) => s && allSkills.add(s.trim()));
+
+    // Map commitment string or number to hours
+    let commitmentHours = 10;
+    if (typeof expectedCommitment === "number") {
+        commitmentHours = expectedCommitment;
+    } else if (typeof expectedCommitment === "string") {
+        if (expectedCommitment === "part_time") commitmentHours = 15;
+        else if (expectedCommitment === "full_time") commitmentHours = 35;
+        else if (expectedCommitment === "flexible") commitmentHours = 10;
+        else commitmentHours = parseInt(expectedCommitment, 10) || 10;
+    }
+
+    // If openRoles is empty, synthesize a primary role from title and experienceLevel
+    if ((!Array.isArray(openRoles) || openRoles.length === 0) && title) {
+        openRoles = [
+            {
+                roleTitle: title.trim(),
+                skillsRequired: Array.from(allSkills),
+                experienceLevel: experienceLevel || "intermediate",
+                openings: 1
+            }
+        ];
     }
 
     const formattedRoles = (Array.isArray(openRoles) ? openRoles : []).map(
@@ -67,7 +99,7 @@ const createOpportunity = asyncHandler(async (req, res) => {
             return {
                 roleTitle: role.roleTitle?.trim() || "Team Member",
                 skillsRequired: roleSkills,
-                experienceLevel: role.experienceLevel || "any",
+                experienceLevel: role.experienceLevel || experienceLevel || "any",
                 openings: Math.max(1, parseInt(role.openings, 10) || 1)
             };
         }
@@ -80,7 +112,7 @@ const createOpportunity = asyncHandler(async (req, res) => {
         workspace: linkedWorkspace,
         openRoles: formattedRoles,
         skillsRequired: Array.from(allSkills),
-        expectedCommitment: Math.max(1, parseInt(expectedCommitment, 10) || 10),
+        expectedCommitment: Math.max(1, commitmentHours),
         status: "open"
     });
 
@@ -133,7 +165,7 @@ const getAllOpportunities = asyncHandler(async (req, res) => {
     const [opportunities, total] = await Promise.all([
         TeamOpportunity.find(query)
             .populate("creator", "username fullName email avatar headline")
-            .populate("workspace", "name description")
+            .populate("workspace", "name description owner members")
             .sort({ createdAt: -1 })
             .skip(skip)
             .limit(limitNum)
@@ -141,12 +173,40 @@ const getAllOpportunities = asyncHandler(async (req, res) => {
         TeamOpportunity.countDocuments(query)
     ]);
 
-    // If request has authenticated user, enrich each opportunity with user's match score
+    let appliedOppIds = new Set();
+    if (req.user) {
+        const oppIds = opportunities.map((o) => o._id);
+        const apps = await TeamApplication.find({
+            candidate: req.user._id,
+            opportunity: { $in: oppIds },
+            status: { $in: ["pending", "accepted"] }
+        }).select("opportunity status");
+        apps.forEach((a) => appliedOppIds.add(a.opportunity.toString()));
+    }
+
+    // If request has authenticated user, enrich each opportunity with user's match score and workspace status
     const results = req.user
         ? opportunities.map((opp) => {
               const match = calculateDeveloperMatch(req.user, opp);
+              const isOwner =
+                  opp.creator?._id?.toString() === req.user._id.toString() ||
+                  opp.creator?.toString() === req.user._id.toString();
+
+              const isWorkspaceMember = opp.workspace && (
+                  (opp.workspace.owner && opp.workspace.owner.toString() === req.user._id.toString()) ||
+                  (Array.isArray(opp.workspace.members) && opp.workspace.members.some((m) => {
+                      const mId = (m.user?._id || m.user)?.toString();
+                      return mId === req.user._id.toString();
+                  }))
+              );
+
+              const hasApplied = appliedOppIds.has(opp._id.toString());
+
               return {
                   ...opp,
+                  isOwner: !!isOwner,
+                  isWorkspaceMember: !!isWorkspaceMember,
+                  hasApplied: !!hasApplied,
                   matchInfo: {
                       matchScore: match.matchScore,
                       breakdown: match.breakdown,
@@ -340,11 +400,27 @@ const getMyOpportunities = asyncHandler(async (req, res) => {
 });
 
 const getRecommendedOpportunitiesForMe = asyncHandler(async (req, res) => {
-    // Fetch all open opportunities not created by current user
-    const opportunities = await TeamOpportunity.find({
+    // Exclude workspaces where current user is already owner or member
+    const userProjects = await Project.find({
+        $or: [
+            { owner: req.user._id },
+            { "members.user": req.user._id }
+        ]
+    }).select("_id");
+    const userWorkspaceIds = userProjects.map((p) => p._id);
+
+    const query = {
         status: "open",
         creator: { $ne: req.user._id }
-    })
+    };
+    if (userWorkspaceIds.length > 0) {
+        query.$or = [
+            { workspace: null },
+            { workspace: { $nin: userWorkspaceIds } }
+        ];
+    }
+
+    const opportunities = await TeamOpportunity.find(query)
         .populate("creator", "username fullName email avatar headline")
         .populate("workspace", "name description")
         .lean();

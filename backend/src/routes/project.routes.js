@@ -27,6 +27,7 @@ router
 
 // Project CRUD
 router.route("/").post(createProject).get(getUserProjects);
+router.route("/my-projects").get(getUserProjects);
 router
     .route("/:projectId")
     .get(getProjectById)
@@ -38,6 +39,8 @@ router
     .route("/:projectId/invitations")
     .post(inviteWorkspaceMember)
     .get(getWorkspacePendingInvitations);
+
+router.route("/:projectId/invite").post(inviteWorkspaceMember);
 
 router.route("/:projectId/members").post(addProjectMember);
 router.route("/:projectId/members/:userId").delete(removeProjectMember);

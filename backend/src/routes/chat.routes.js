@@ -16,8 +16,11 @@ router.use(verifyJWT);
 // Conversations listing
 router.route("/conversations").get(getUserConversations);
 
-// Initialize or get 1-to-1 direct chat (pre-team or teammate)
-router.route("/direct/:recipientId").post(getOrCreateDirectConversation);
+// Initialize or get 1-to-1 direct chat (pre-team or teammate) - supports GET and POST
+router
+    .route("/direct/:recipientId")
+    .get(getOrCreateDirectConversation)
+    .post(getOrCreateDirectConversation);
 
 // Initialize or get workspace team chat channel
 router.route("/workspace/:projectId").get(getOrCreateWorkspaceConversation);

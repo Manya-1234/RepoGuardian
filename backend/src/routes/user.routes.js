@@ -20,7 +20,8 @@ router.route("/refresh-token").post(refreshAccessToken);
 
 // Developer Discovery routes
 router.route("/developers").get(optionalVerifyJWT, getAllDevelopers);
-router.route("/developers/:userId").get(getDeveloperProfile);
+router.route("/developers/:userId").get(optionalVerifyJWT, getDeveloperProfile);
+router.route("/profile/:identifier").get(optionalVerifyJWT, getDeveloperProfile);
 
 // Secured/protected routes
 router.route("/logout").post(verifyJWT, logoutUser);

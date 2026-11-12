@@ -9,9 +9,20 @@ import { createAndEmitNotification } from "../utils/notification.helper.js";
 let io = null;
 
 export const initSocket = (server) => {
+    const allowedOrigins = [
+        process.env.CORS_ORIGIN,
+        "http://localhost:5173",
+        "http://127.0.0.1:5173"
+    ].filter(Boolean);
+
     io = new Server(server, {
         cors: {
-            origin: process.env.CORS_ORIGIN || "*",
+            origin: (origin, callback) => {
+                if (!origin || allowedOrigins.includes(origin) || allowedOrigins.includes("*")) {
+                    return callback(null, true);
+                }
+                return callback(null, true);
+            },
             credentials: true
         }
     });
@@ -181,7 +192,7 @@ export const initSocket = (server) => {
                             type: "new_message",
                             title: `New message from ${socket.user.fullName}`,
                             message: snippet,
-                            link: `/chat/${conversation._id}`
+                            link: `/messages?convo=${conversation._id}`
                         });
                     }
                 } else if (conversation.type === "workspace") {
@@ -203,7 +214,7 @@ export const initSocket = (server) => {
                                 type: "new_message",
                                 title: `New message in ${project.name}`,
                                 message: `${socket.user.fullName}: ${snippet}`,
-                                link: `/chat/workspace/${project._id}`
+                                link: `/workspaces/${project._id}`
                             });
                         }
                     }
