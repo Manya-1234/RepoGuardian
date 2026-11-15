@@ -27,7 +27,7 @@ export const NotificationDropdown = ({ onClose }) => {
     fetchNotifications();
   }, []);
 
-  const handleMarkAsRead = async (id, link) => {
+  const handleMarkAsRead = async (id, link, notification) => {
     try {
       await notificationApi.markAsRead(id);
       setNotifications((prev) =>
@@ -37,15 +37,26 @@ export const NotificationDropdown = ({ onClose }) => {
       if (link) {
         onClose();
         let targetLink = link;
+        const isMsg =
+          notification?.type === "new_message" ||
+          notification?.title?.toLowerCase().includes("message");
+
         if (link.startsWith("/chat/workspace/")) {
           const wsId = link.replace("/chat/workspace/", "");
-          targetLink = `/workspaces/${wsId}`;
+          targetLink = `/workspaces/${wsId}?tab=chat`;
         } else if (link.startsWith("/chat/")) {
           const convoId = link.replace("/chat/", "");
           targetLink = `/messages?convo=${convoId}`;
         } else if (link.startsWith("/projects/")) {
           const projId = link.replace("/projects/", "");
-          targetLink = `/workspaces/${projId}`;
+          targetLink = `/workspaces/${projId}${isMsg ? "?tab=chat" : ""}`;
+        } else if (link.startsWith("/workspaces/")) {
+          if (isMsg && !link.includes("tab=")) {
+            targetLink = `${link}${link.includes("?") ? "&" : "?"}tab=chat`;
+          }
+        } else if (link.startsWith("/opportunities/")) {
+          const oppId = link.replace("/opportunities/", "");
+          targetLink = `/opportunities?tab=my&opportunityId=${oppId}`;
         }
         navigate(targetLink);
       }
@@ -106,7 +117,7 @@ export const NotificationDropdown = ({ onClose }) => {
           notifications.map((n) => (
             <div
               key={n._id}
-              onClick={() => handleMarkAsRead(n._id, n.link)}
+              onClick={() => handleMarkAsRead(n._id, n.link, n)}
               className={`p-3.5 hover:bg-slate-800/60 cursor-pointer transition flex items-start gap-3 ${
                 !n.isRead ? "bg-indigo-950/20" : ""
               }`}

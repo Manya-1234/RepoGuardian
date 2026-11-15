@@ -16,12 +16,19 @@ import {
   ArrowLeft,
   Copy,
   Check,
+  Sparkles,
 } from "lucide-react";
 import { githubApi } from "../../api/github.api";
 import { LoadingSpinner } from "../common/LoadingSpinner";
 import { Badge } from "../common/Badge";
 
-export const GitHubExplorer = ({ workspace, isOwner = false, onWorkspaceUpdated }) => {
+export const GitHubExplorer = ({
+  workspace,
+  isOwner = false,
+  onWorkspaceUpdated,
+  selectedFile = null,
+  onOpenAI = null,
+}) => {
   const [subTab, setSubTab] = useState("overview"); // 'overview' | 'tree' | 'commits' | 'pulls'
   const [repoDetails, setRepoDetails] = useState(null);
   const [branches, setBranches] = useState([]);
@@ -136,6 +143,14 @@ export const GitHubExplorer = ({ workspace, isOwner = false, onWorkspaceUpdated 
     }
   };
 
+  // Sync selectedFile if navigated from external source (e.g., RAG Assistant)
+  useEffect(() => {
+    if (selectedFile?.path && isLinked) {
+      setSubTab("tree");
+      handleOpenFile(selectedFile.path);
+    }
+  }, [selectedFile, isLinked]);
+
   const handleCopyCode = () => {
     navigator.clipboard.writeText(fileContent);
     setCopied(true);
@@ -219,7 +234,19 @@ export const GitHubExplorer = ({ workspace, isOwner = false, onWorkspaceUpdated 
         </div>
 
         {/* Branch Selector & Stats */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
+          {onOpenAI && (
+            <button
+              type="button"
+              onClick={onOpenAI}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-indigo-600 via-indigo-500 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-semibold shadow-md shadow-indigo-600/30 transition cursor-pointer"
+              title="Query this codebase with AI"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+              <span>Ask Codebase AI</span>
+            </button>
+          )}
+
           <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-300">
             <GitBranch className="w-3.5 h-3.5 text-indigo-400" />
             <select
@@ -440,34 +467,64 @@ export const GitHubExplorer = ({ workspace, isOwner = false, onWorkspaceUpdated 
               No recent commits found.
             </div>
           ) : (
-            commits.map((c) => (
-              <div
-                key={c.sha}
-                className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800/80 flex items-start justify-between gap-4"
-              >
-                <div className="flex items-start gap-3 min-w-0">
-                  <GitCommit className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
-                  <div>
-                    <p className="text-xs font-semibold text-slate-200 line-clamp-1">
-                      {c.message}
-                    </p>
-                    <p className="text-[11px] text-slate-400 mt-1">
-                      {c.author?.name} committed on{" "}
-                      {new Date(c.author?.date).toLocaleDateString()}
-                    </p>
-                  </div>
-                </div>
+            commits.map((c) => {
+              const commitDate = c.date || c.author?.date;
+              let formattedDate = "Recently";
+              if (commitDate) {
+                const parsed = new Date(commitDate);
+                if (!isNaN(parsed.getTime())) {
+                  formattedDate = parsed.toLocaleString(undefined, {
+                    year: "numeric",
+                    month: "short",
+                    day: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  });
+                }
+              }
+              const author =
+                c.authorName || c.author?.name || c.authorUsername || "Unknown";
+              const branchName = c.branch || selectedBranch || "main";
 
-                <a
-                  href={`https://github.com/${owner}/${repo}/commit/${c.sha}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="font-mono text-[10px] text-indigo-400 hover:text-indigo-300 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 shrink-0"
+              return (
+                <div
+                  key={c.sha}
+                  className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800/80 flex items-start justify-between gap-4"
                 >
-                  {c.sha.substring(0, 7)}
-                </a>
-              </div>
-            ))
+                  <div className="flex items-start gap-3 min-w-0">
+                    <GitCommit className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-xs font-semibold text-slate-200 line-clamp-1">
+                        {c.message}
+                      </p>
+                      <div className="text-[11px] text-slate-400 mt-1 flex flex-wrap items-center gap-1.5">
+                        <span className="font-medium text-slate-200">
+                          {author}
+                        </span>
+                        <span>committed on</span>
+                        <span className="text-slate-300 font-medium">
+                          {formattedDate}
+                        </span>
+                        <span>in</span>
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-slate-900 border border-slate-800 text-[10px] font-mono text-indigo-400">
+                          <GitBranch className="w-3 h-3" />
+                          {branchName}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <a
+                    href={`https://github.com/${owner}/${repo}/commit/${c.sha}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-mono text-[10px] text-indigo-400 hover:text-indigo-300 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 shrink-0 hover:border-slate-700 transition"
+                  >
+                    {c.sha.substring(0, 7)}
+                  </a>
+                </div>
+              );
+            })
           )}
         </div>
       ) : (

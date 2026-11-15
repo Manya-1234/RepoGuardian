@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useSearchParams } from "react-router-dom";
 import {
   LayoutGrid,
   CheckCircle2,
@@ -8,28 +8,68 @@ import {
   Users,
   UserPlus,
   Shield,
+  ShieldCheck,
+  ShieldAlert,
   ArrowLeft,
   Mail,
   Trash2,
+  Sparkles,
 } from "lucide-react";
 import { projectApi } from "../api/project.api";
 import { chatApi } from "../api/chat.api";
 import { useAuth } from "../context/AuthContext";
+import { useSocket } from "../context/SocketContext";
 import { KanbanBoard } from "../components/kanban/KanbanBoard";
 import { ChatWindow } from "../components/chat/ChatWindow";
 import { GitHubExplorer } from "../components/github/GitHubExplorer";
+import { CodebaseAssistant } from "../components/rag/CodebaseAssistant";
 import { Modal } from "../components/common/Modal";
 import { Badge } from "../components/common/Badge";
 import { LoadingSpinner } from "../components/common/LoadingSpinner";
 
 export const WorkspaceDetailPage = () => {
   const { id } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user: currentUser } = useAuth();
+  const { socket } = useSocket();
 
+  const tabFromQuery = searchParams.get("tab");
   const [workspace, setWorkspace] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState("kanban"); // 'kanban' | 'chat' | 'github' | 'members'
+  const [activeTab, setActiveTab] = useState(
+    tabFromQuery && ["kanban", "chat", "github", "ai", "members"].includes(tabFromQuery)
+      ? tabFromQuery
+      : "kanban"
+  );
   const [chatConversationId, setChatConversationId] = useState(null);
+  const [selectedFileForExplorer, setSelectedFileForExplorer] = useState(null);
+
+  // Synchronize activeTab with URL search params (e.g. when clicking notifications or links with ?tab=chat)
+  useEffect(() => {
+    if (
+      tabFromQuery &&
+      ["kanban", "chat", "github", "ai", "members"].includes(tabFromQuery) &&
+      tabFromQuery !== activeTab
+    ) {
+      setActiveTab(tabFromQuery);
+    }
+  }, [tabFromQuery]);
+
+  const handleTabChange = (newTab) => {
+    setActiveTab(newTab);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (newTab === "kanban") {
+          next.delete("tab");
+        } else {
+          next.set("tab", newTab);
+        }
+        return next;
+      },
+      { replace: true }
+    );
+  };
 
   // Invite Modal State
   const [isInviteOpen, setIsInviteOpen] = useState(false);
@@ -57,6 +97,46 @@ export const WorkspaceDetailPage = () => {
     }
   }, [id]);
 
+  // Real-time workspace synchronization
+  useEffect(() => {
+    if (!socket || !id) return;
+    socket.emit("join_workspace", id);
+
+    const handleWorkspaceUpdated = (updated) => {
+      if (
+        updated &&
+        (updated._id === id || updated._id?.toString() === id.toString())
+      ) {
+        setWorkspace(updated);
+      }
+    };
+
+    const handleMemberRemoved = ({ projectId, workspace: updatedWs }) => {
+      if (projectId?.toString() === id.toString()) {
+        if (updatedWs) setWorkspace(updatedWs);
+        else fetchWorkspace();
+      }
+    };
+
+    const handleMemberRoleUpdated = ({ projectId, workspace: updatedWs }) => {
+      if (projectId?.toString() === id.toString()) {
+        if (updatedWs) setWorkspace(updatedWs);
+        else fetchWorkspace();
+      }
+    };
+
+    socket.on("workspace_updated", handleWorkspaceUpdated);
+    socket.on("member_removed", handleMemberRemoved);
+    socket.on("member_role_updated", handleMemberRoleUpdated);
+
+    return () => {
+      socket.emit("leave_workspace", id);
+      socket.off("workspace_updated", handleWorkspaceUpdated);
+      socket.off("member_removed", handleMemberRemoved);
+      socket.off("member_role_updated", handleMemberRoleUpdated);
+    };
+  }, [socket, id]);
+
   // Load workspace conversation for the Chat tab
   useEffect(() => {
     if (id && activeTab === "chat") {
@@ -73,14 +153,22 @@ export const WorkspaceDetailPage = () => {
   }, [id, activeTab]);
 
   const isOwner =
-    workspace?.owner?._id === currentUser?._id ||
-    workspace?.owner === currentUser?._id;
+    (workspace?.owner?._id || workspace?.owner)?.toString() === currentUser?._id?.toString();
+
+  const isAdmin =
+    isOwner ||
+    (workspace?.members || []).some((m) => {
+      const uId = (m.user?._id || m.user)?.toString();
+      return uId === currentUser?._id?.toString() && m.role === "admin";
+    });
+
+  const canManageTasks = isOwner || isAdmin;
 
   const isMember =
     isOwner ||
     workspace?.members?.some((m) => {
-      const uId = m.user?._id || m.user;
-      return uId === currentUser?._id;
+      const uId = (m.user?._id || m.user)?.toString();
+      return uId === currentUser?._id?.toString();
     });
 
   const ownerId = (workspace?.owner?._id || workspace?.owner)?.toString();
@@ -93,14 +181,41 @@ export const WorkspaceDetailPage = () => {
     ? [
         {
           user: workspace.owner,
-          role: "Owner",
+          role: "owner",
+          isOwner: true,
         },
         ...otherMembers.map((m) => ({
           user: m.user,
-          role: m.role || "Member",
+          role: (m.role || "member").toLowerCase(),
+          isOwner: false,
         })),
       ]
     : [];
+
+  const handleUpdateRole = async (userId, newRole) => {
+    try {
+      const res = await projectApi.updateMemberRole(id, userId, newRole);
+      if (res.data) setWorkspace(res.data);
+    } catch (err) {
+      alert(err.response?.data?.message || err.message || "Failed to update role");
+    }
+  };
+
+  const handleRemoveMember = async (userId, memberName) => {
+    if (
+      !window.confirm(
+        `Are you sure you want to remove ${memberName || "this member"} from the workspace?`
+      )
+    ) {
+      return;
+    }
+    try {
+      const res = await projectApi.removeMember(id, userId);
+      if (res.data) setWorkspace(res.data);
+    } catch (err) {
+      alert(err.response?.data?.message || err.message || "Failed to remove member");
+    }
+  };
 
   const handleSendInvite = async (e) => {
     e.preventDefault();
@@ -194,11 +309,12 @@ export const WorkspaceDetailPage = () => {
       </div>
 
       {/* Tabs Bar */}
-      <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
+      <div className="flex items-center gap-2 border-b border-slate-800 pb-3 overflow-x-auto">
         {[
           { id: "kanban", name: "Kanban Tasks", icon: CheckCircle2 },
           { id: "chat", name: "Team Chat", icon: MessageSquare },
           { id: "github", name: "GitHub Explorer", icon: Github },
+          { id: "ai", name: "Codebase Intelligence", icon: Sparkles },
           { id: "members", name: "Team Members", icon: Users },
         ].map((tab) => {
           const Icon = tab.icon;
@@ -206,8 +322,8 @@ export const WorkspaceDetailPage = () => {
           return (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition ${
+              onClick={() => handleTabChange(tab.id)}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition cursor-pointer ${
                 isActive
                   ? "bg-indigo-600/20 text-indigo-400 border border-indigo-500/40"
                   : "text-slate-400 hover:text-slate-200"
@@ -226,6 +342,7 @@ export const WorkspaceDetailPage = () => {
           workspaceId={workspace._id}
           members={allMembers}
           isMember={isMember}
+          canManageTasks={canManageTasks}
         />
       )}
 
@@ -249,7 +366,19 @@ export const WorkspaceDetailPage = () => {
         <GitHubExplorer
           workspace={workspace}
           isOwner={isOwner}
+          selectedFile={selectedFileForExplorer}
+          onOpenAI={() => handleTabChange("ai")}
           onWorkspaceUpdated={(updated) => setWorkspace(updated)}
+        />
+      )}
+
+      {activeTab === "ai" && (
+        <CodebaseAssistant
+          workspace={workspace}
+          onNavigateToFile={(filePath, startLine) => {
+            setSelectedFileForExplorer({ path: filePath, line: startLine });
+            handleTabChange("github");
+          }}
         />
       )}
 
@@ -272,10 +401,31 @@ export const WorkspaceDetailPage = () => {
           <div className="divide-y divide-slate-800/80">
             {allMembers.map((m, idx) => {
               const u = m.user || {};
+              const uId = (u._id || u.id)?.toString();
+              const isThisOwner = m.isOwner;
+              const isThisAdmin = m.role === "admin";
+              const canDemote = isOwner && !isThisOwner && isThisAdmin;
+              const canPromote = isOwner && !isThisOwner && !isThisAdmin;
+              const canRemove =
+                (isOwner && !isThisOwner) ||
+                (isAdmin && !isOwner && !isThisOwner && !isThisAdmin);
+
+              const roleBadgeVariant = isThisOwner
+                ? "purple"
+                : isThisAdmin
+                ? "amber"
+                : "indigo";
+
+              const roleLabel = isThisOwner
+                ? "Owner"
+                : isThisAdmin
+                ? "Admin"
+                : "Member";
+
               return (
                 <div
-                  key={u._id || idx}
-                  className="py-3.5 flex items-center justify-between gap-4"
+                  key={uId || idx}
+                  className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
                 >
                   <div className="flex items-center gap-3">
                     <img
@@ -294,23 +444,60 @@ export const WorkspaceDetailPage = () => {
                         >
                           {u.fullName || u.username}
                         </Link>
-                        <Badge
-                          variant={m.role === "Owner" ? "purple" : "indigo"}
-                          size="xs"
-                        >
-                          {m.role}
+                        <Badge variant={roleBadgeVariant} size="xs">
+                          {roleLabel}
                         </Badge>
                       </div>
                       <p className="text-xs text-slate-400">@{u.username}</p>
                     </div>
                   </div>
 
-                  <Link
-                    to={`/profile/${u.username}`}
-                    className="px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-300 hover:text-white transition"
-                  >
-                    View Profile
-                  </Link>
+                  <div className="flex items-center gap-2 self-end sm:self-center flex-wrap">
+                    {/* Make Admin Button (Only Owner can promote) */}
+                    {canPromote && (
+                      <button
+                        onClick={() => handleUpdateRole(uId, "admin")}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 text-xs font-semibold transition"
+                        title="Promote member to Workspace Admin"
+                      >
+                        <ShieldCheck className="w-3.5 h-3.5" />
+                        <span>Make Admin</span>
+                      </button>
+                    )}
+
+                    {/* Remove Admin Button (Only Owner can demote) */}
+                    {canDemote && (
+                      <button
+                        onClick={() => handleUpdateRole(uId, "member")}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-semibold transition"
+                        title="Demote admin to regular Member"
+                      >
+                        <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Remove Admin</span>
+                      </button>
+                    )}
+
+                    {/* Remove Member Button (Owner or Admin) */}
+                    {canRemove && (
+                      <button
+                        onClick={() =>
+                          handleRemoveMember(uId, u.fullName || u.username)
+                        }
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 text-xs font-semibold transition"
+                        title="Remove user from workspace"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Remove Member</span>
+                      </button>
+                    )}
+
+                    <Link
+                      to={`/profile/${u.username}`}
+                      className="px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-300 hover:text-white transition"
+                    >
+                      View Profile
+                    </Link>
+                  </div>
                 </div>
               );
             })}

@@ -31,6 +31,7 @@ export const CreateTaskModal = ({
     try {
       const payload = {
         workspace: workspaceId,
+        projectId: workspaceId,
         title: formData.title.trim(),
         description: formData.description.trim(),
         status: formData.status,
@@ -40,11 +41,15 @@ export const CreateTaskModal = ({
       if (formData.assignedTo) payload.assignedTo = formData.assignedTo;
       if (formData.dueDate) payload.dueDate = formData.dueDate;
       if (formData.githubUrl.trim()) {
-        payload.github = { url: formData.githubUrl.trim() };
+        payload.github = {
+          url: formData.githubUrl.trim(),
+          prUrl: formData.githubUrl.trim(),
+        };
       }
 
       const res = await taskApi.createTask(payload);
-      if (onTaskCreated) onTaskCreated(res.data);
+      const createdTask = res.data || res;
+      if (onTaskCreated) onTaskCreated(createdTask);
       onClose();
       setFormData({
         title: "",

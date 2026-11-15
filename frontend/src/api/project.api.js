@@ -12,4 +12,6 @@ export const projectApi = {
     api.patch(`/projects/invitations/${invitationId}/respond`, { action }),
   removeMember: (projectId, userId) =>
     api.delete(`/projects/${projectId}/members/${userId}`),
+  updateMemberRole: (projectId, userId, role) =>
+    api.patch(`/projects/${projectId}/members/${userId}/role`, { role }),
 };

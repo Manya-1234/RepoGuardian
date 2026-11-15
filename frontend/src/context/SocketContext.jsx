@@ -50,6 +50,10 @@ export const SocketProvider = ({ children }) => {
       // console.log("Socket connected:", socketInstance.id);
     });
 
+    socketInstance.on("connect_error", (err) => {
+      console.warn("Socket connect error:", err.message);
+    });
+
     socketInstance.on("new_notification", (notification) => {
       setUnreadCount((prev) => prev + 1);
       setLiveAlert(notification);
