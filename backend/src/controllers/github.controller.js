@@ -12,6 +12,7 @@ import {
     fetchGitTree,
     fetchRawFileContent
 } from "../utils/github.service.js";
+import { scheduleAutomaticIndexing } from "../services/rag/ingestion.service.js";
 
 /**
  * Helper to retrieve workspace and verify membership.
@@ -70,6 +71,11 @@ const linkRepository = asyncHandler(async (req, res) => {
 
     project.githubRepo = repoDetails;
     await project.save();
+
+    // Trigger fully automatic background indexing immediately upon repository connection
+    scheduleAutomaticIndexing(projectId, repoDetails.defaultBranch || "main").catch((err) => {
+        console.warn(`[AutoIndex] Automatic indexing initiation failed for ${repoOwner}/${repoName}:`, err.message);
+    });
 
     const updatedProject = await Project.findById(projectId)
         .populate("owner", "username fullName email avatar")

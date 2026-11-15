@@ -289,14 +289,29 @@ const sendMessageRest = asyncHandler(async (req, res) => {
     await conversation.save();
 
     const populatedMessage = await Message.findById(message._id)
-        .populate("sender", "username fullName avatar headline");
+        .populate("sender", "username fullName email avatar headline");
 
     // Broadcast live over WebSockets if io is available
     try {
         const io = getIO();
-        io.to(conversationId).emit("receive_message", populatedMessage);
+        const room = conversationId.toString();
+        io.to(room).emit("receive_message", populatedMessage);
+
+        if (conversation.type === "direct") {
+            for (const participantId of conversation.participants) {
+                io.to(`user_${participantId.toString()}`).emit(
+                    "receive_message",
+                    populatedMessage
+                );
+            }
+        } else if (conversation.type === "workspace" && conversation.workspace) {
+            io.to(conversation.workspace.toString()).emit(
+                "receive_message",
+                populatedMessage
+            );
+        }
     } catch {
-        // Continue even if socket server is not yet attached in testing
+        // Non-blocking
     }
 
     // Trigger in-app notification for recipient(s)
@@ -338,7 +353,7 @@ const sendMessageRest = asyncHandler(async (req, res) => {
                     type: "new_message",
                     title: `New message in ${project.name}`,
                     message: `${req.user.fullName}: ${snippet}`,
-                    link: `/chat/workspace/${project._id}`
+                    link: `/workspaces/${project._id}?tab=chat`
                 });
             }
         }

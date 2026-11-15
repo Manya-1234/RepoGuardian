@@ -78,7 +78,7 @@ const applyToOpportunity = asyncHandler(async (req, res) => {
         type: "join_request",
         title: "New Join Request",
         message: `${req.user.fullName} (@${req.user.username}) applied for ${role} on "${opportunity.title}"`,
-        link: `/opportunities/${opportunity._id}`
+        link: `/opportunities?tab=my&opportunityId=${opportunity._id}`
     });
 
     return res
@@ -174,7 +174,7 @@ const inviteDeveloper = asyncHandler(async (req, res) => {
         type: "invitation",
         title: "Team Invitation Received",
         message: `${req.user.fullName} (@${req.user.username}) invited you to join "${opportunity.title}" as ${role}`,
-        link: `/opportunities/${opportunity._id}`
+        link: `/opportunities?tab=my&opportunityId=${opportunity._id}`
     });
 
     return res
@@ -205,6 +205,9 @@ const respondToApplication = asyncHandler(async (req, res) => {
             "Invalid action. Must be 'accept', 'reject', or 'withdraw'"
         );
     }
+
+    // Ensure downstream logic uses resolved action
+    action = resolvedAction;
 
     const application = await TeamApplication.findById(applicationId).populate(
         "opportunity"
@@ -293,7 +296,7 @@ const respondToApplication = asyncHandler(async (req, res) => {
         type: action === "accept" ? "request_accepted" : "request_rejected",
         title: `Application ${newStatus}`,
         message: `${req.user.fullName} has ${newStatus} the ${application.type === "invitation" ? "invitation" : "join request"} for "${opportunity.title}"`,
-        link: `/opportunities/${opportunity._id}`
+        link: `/opportunities?tab=my&opportunityId=${opportunity._id}`
     });
 
     return res

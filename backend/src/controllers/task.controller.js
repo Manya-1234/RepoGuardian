@@ -8,16 +8,26 @@ import { createAndEmitNotification } from "../utils/notification.helper.js";
 import { getIO } from "../socket/index.js";
 
 const createTask = asyncHandler(async (req, res) => {
-    const { projectId } = req.params;
+    const projectId =
+        req.params.projectId ||
+        req.body.workspace ||
+        req.body.workspaceId ||
+        req.body.projectId;
+
     const {
         title,
         description = "",
         assignedTo = null,
         priority = "medium",
+        status = "todo",
         dueDate = null,
         tags = [],
         github = {}
     } = req.body;
+
+    if (!projectId) {
+        throw new ApiError(400, "Workspace ID is required");
+    }
 
     if (!mongoose.isValidObjectId(projectId)) {
         throw new ApiError(400, "Invalid workspace ID format");
@@ -32,15 +42,18 @@ const createTask = asyncHandler(async (req, res) => {
         throw new ApiError(404, "Workspace not found");
     }
 
-    // Verify caller is owner or member of this workspace
-    const isMember =
-        project.owner.equals(req.user._id) ||
-        project.members.some((m) => m.user.equals(req.user._id));
+    // Verify caller is owner or admin of this workspace
+    const isOwner = project.owner.equals(req.user._id);
+    const isAdmin = project.members.some(
+        (m) =>
+            (m.user?._id || m.user).toString() === req.user._id.toString() &&
+            m.role === "admin"
+    );
 
-    if (!isMember) {
+    if (!isOwner && !isAdmin) {
         throw new ApiError(
             403,
-            "Access denied: You are not a member of this workspace"
+            "Access denied: Only workspace owners and admins can create tasks"
         );
     }
 
@@ -64,18 +77,22 @@ const createTask = asyncHandler(async (req, res) => {
         validAssignee = assignedTo;
     }
 
+    const githubUrl = github?.url?.trim() || github?.prUrl?.trim() || "";
+
     const task = await Task.create({
         title: title.trim(),
         description: description.trim(),
         project: projectId,
         assignedTo: validAssignee,
         createdBy: req.user._id,
-        priority,
+        priority: ["low", "medium", "high", "urgent"].includes(priority) ? priority : "medium",
+        status: ["todo", "in_progress", "in_review", "done"].includes(status) ? status : "todo",
         dueDate: dueDate ? new Date(dueDate) : null,
         tags: Array.isArray(tags) ? tags.map((t) => t.trim()).filter(Boolean) : [],
         github: {
             branch: github?.branch?.trim() || "",
-            prUrl: github?.prUrl?.trim() || "",
+            prUrl: githubUrl,
+            url: githubUrl,
             issueNumber: github?.issueNumber || null
         }
     });
@@ -111,8 +128,17 @@ const createTask = asyncHandler(async (req, res) => {
 });
 
 const getWorkspaceTasks = asyncHandler(async (req, res) => {
-    const { projectId } = req.params;
+    const projectId =
+        req.params.projectId ||
+        req.query.workspaceId ||
+        req.query.projectId ||
+        req.query.workspace;
+
     const { status, priority, assignedTo, search, tag, groupBy } = req.query;
+
+    if (!projectId) {
+        throw new ApiError(400, "Workspace ID is required");
+    }
 
     if (!mongoose.isValidObjectId(projectId)) {
         throw new ApiError(400, "Invalid workspace ID format");
@@ -227,7 +253,7 @@ const getTaskById = asyncHandler(async (req, res) => {
 
 const updateTask = asyncHandler(async (req, res) => {
     const { taskId } = req.params;
-    const { title, description, priority, dueDate, tags, github } = req.body;
+    const { title, description, priority, status, dueDate, tags, github } = req.body;
 
     if (!mongoose.isValidObjectId(taskId)) {
         throw new ApiError(400, "Invalid task ID format");
@@ -239,9 +265,21 @@ const updateTask = asyncHandler(async (req, res) => {
     }
 
     const project = await Project.findById(task.project);
-    const isMember =
-        project.owner.equals(req.user._id) ||
-        project.members.some((m) => m.user.equals(req.user._id));
+    const isOwner = project.owner.equals(req.user._id);
+    const isAdmin = project.members.some(
+        (m) =>
+            (m.user?._id || m.user).toString() === req.user._id.toString() &&
+            m.role === "admin"
+    );
+
+    if (status && !isOwner && !isAdmin) {
+        throw new ApiError(
+            403,
+            "Access denied: Only workspace owners and admins can move task status"
+        );
+    }
+
+    const isMember = isOwner || project.members.some((m) => m.user.equals(req.user._id));
 
     if (!isMember) {
         throw new ApiError(
@@ -255,6 +293,24 @@ const updateTask = asyncHandler(async (req, res) => {
     if (priority && ["low", "medium", "high", "urgent"].includes(priority)) {
         task.priority = priority;
     }
+    const oldStatus = task.status;
+    if (status && ["todo", "in_progress", "in_review", "done"].includes(status)) {
+        task.status = status;
+        if (
+            (status === "in_review" || status === "done") &&
+            !task.createdBy.equals(req.user._id) &&
+            oldStatus !== status
+        ) {
+            await createAndEmitNotification({
+                recipient: task.createdBy,
+                sender: req.user._id,
+                type: "task_status_changed",
+                title: `Task Marked as ${status.replace("_", " ").toUpperCase()}`,
+                message: `${req.user.fullName} moved task "${task.title}" to ${status.replace("_", " ")}`,
+                link: `/workspaces/${project._id}`
+            });
+        }
+    }
     if (dueDate !== undefined) {
         task.dueDate = dueDate ? new Date(dueDate) : null;
     }
@@ -262,11 +318,11 @@ const updateTask = asyncHandler(async (req, res) => {
         task.tags = tags.map((t) => t.trim()).filter(Boolean);
     }
     if (github && typeof github === "object") {
-        task.github = {
-            branch: github.branch?.trim() || task.github?.branch || "",
-            prUrl: github.prUrl?.trim() || task.github?.prUrl || "",
-            issueNumber: github.issueNumber !== undefined ? github.issueNumber : task.github?.issueNumber
-        };
+        const branch = github.branch?.trim() || task.github?.branch || "";
+        const prUrl = github.prUrl?.trim() || github.url?.trim() || task.github?.prUrl || "";
+        const url = github.url?.trim() || github.prUrl?.trim() || task.github?.url || "";
+        const issueNumber = github.issueNumber !== undefined ? github.issueNumber : task.github?.issueNumber;
+        task.github = { branch, prUrl, url, issueNumber };
     }
 
     await task.save();
@@ -278,6 +334,14 @@ const updateTask = asyncHandler(async (req, res) => {
     try {
         const io = getIO();
         io.to(task.project.toString()).emit("task_updated", updatedTask);
+        if (status && oldStatus !== status) {
+            io.to(task.project.toString()).emit("task_status_updated", {
+                taskId: task._id,
+                oldStatus,
+                newStatus: status,
+                task: updatedTask
+            });
+        }
     } catch {
         // Non-blocking
     }
@@ -308,9 +372,21 @@ const updateTaskStatus = asyncHandler(async (req, res) => {
     }
 
     const project = await Project.findById(task.project);
-    const isMember =
-        project.owner.equals(req.user._id) ||
-        project.members.some((m) => m.user.equals(req.user._id));
+    const isOwner = project.owner.equals(req.user._id);
+    const isAdmin = project.members.some(
+        (m) =>
+            (m.user?._id || m.user).toString() === req.user._id.toString() &&
+            m.role === "admin"
+    );
+
+    if (!isOwner && !isAdmin) {
+        throw new ApiError(
+            403,
+            "Access denied: Only workspace owners and admins can move task status"
+        );
+    }
+
+    const isMember = isOwner || project.members.some((m) => m.user.equals(req.user._id));
 
     if (!isMember) {
         throw new ApiError(
@@ -379,9 +455,21 @@ const reassignTask = asyncHandler(async (req, res) => {
     }
 
     const project = await Project.findById(task.project);
-    const isMember =
-        project.owner.equals(req.user._id) ||
-        project.members.some((m) => m.user.equals(req.user._id));
+    const isOwner = project.owner.equals(req.user._id);
+    const isAdmin = project.members.some(
+        (m) =>
+            (m.user?._id || m.user).toString() === req.user._id.toString() &&
+            m.role === "admin"
+    );
+
+    if (!isOwner && !isAdmin) {
+        throw new ApiError(
+            403,
+            "Access denied: Only workspace owners and admins can reassign tasks"
+        );
+    }
+
+    const isMember = isOwner || project.members.some((m) => m.user.equals(req.user._id));
 
     if (!isMember) {
         throw new ApiError(

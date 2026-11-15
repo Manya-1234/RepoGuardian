@@ -78,6 +78,7 @@ export const initSocket = (server) => {
         // Join chat room (either direct 1-to-1 or shared workspace channel)
         socket.on("join_chat", async (conversationId) => {
             try {
+                if (!conversationId) return;
                 const conversation = await Conversation.findById(conversationId);
                 if (!conversation) {
                     return socket.emit("chat_error", "Conversation not found");
@@ -101,7 +102,9 @@ export const initSocket = (server) => {
                     }
                     const isMember =
                         project.owner.equals(socket.user._id) ||
-                        project.members.some((m) => m.user.equals(socket.user._id));
+                        project.members.some((m) =>
+                            (m.user?._id || m.user).toString() === socket.user._id.toString()
+                        );
                     if (!isMember) {
                         return socket.emit(
                             "chat_error",
@@ -110,8 +113,9 @@ export const initSocket = (server) => {
                     }
                 }
 
-                socket.join(conversationId);
-                socket.emit("joined_chat", { conversationId });
+                const room = conversationId.toString();
+                socket.join(room);
+                socket.emit("joined_chat", { conversationId: room });
             } catch (err) {
                 socket.emit("chat_error", err.message);
             }
@@ -119,13 +123,29 @@ export const initSocket = (server) => {
 
         // Leave a chat room
         socket.on("leave_chat", (conversationId) => {
-            socket.leave(conversationId);
+            if (conversationId) {
+                socket.leave(conversationId.toString());
+            }
+        });
+
+        // Join workspace room for tasks and project events
+        socket.on("join_workspace", (workspaceId) => {
+            if (workspaceId) {
+                socket.join(workspaceId.toString());
+            }
+        });
+
+        // Leave workspace room
+        socket.on("leave_workspace", (workspaceId) => {
+            if (workspaceId) {
+                socket.leave(workspaceId.toString());
+            }
         });
 
         // Live send_message event
         socket.on("send_message", async ({ conversationId, content }) => {
             try {
-                if (!content || !content.trim()) return;
+                if (!content || !content.trim() || !conversationId) return;
 
                 const conversation = await Conversation.findById(conversationId);
                 if (!conversation) {
@@ -149,7 +169,9 @@ export const initSocket = (server) => {
                     }
                     const isMember =
                         project.owner.equals(socket.user._id) ||
-                        project.members.some((m) => m.user.equals(socket.user._id));
+                        project.members.some((m) =>
+                            (m.user?._id || m.user).toString() === socket.user._id.toString()
+                        );
                     if (!isMember) {
                         return socket.emit(
                             "chat_error",
@@ -170,10 +192,30 @@ export const initSocket = (server) => {
                 await conversation.save();
 
                 const populatedMessage = await Message.findById(message._id)
-                    .populate("sender", "username fullName avatar headline");
+                    .populate("sender", "username fullName email avatar headline");
+
+                const room = conversationId.toString();
 
                 // 3. Broadcast to all sockets in the conversation room
-                io.to(conversationId).emit("receive_message", populatedMessage);
+                io.to(room).emit("receive_message", populatedMessage);
+
+                // Also emit directly to sender socket (ensures immediate feedback)
+                socket.emit("receive_message", populatedMessage);
+
+                // 4. Also broadcast to participants' personal rooms for sidebar live updates
+                if (conversation.type === "direct") {
+                    for (const participantId of conversation.participants) {
+                        io.to(`user_${participantId.toString()}`).emit(
+                            "receive_message",
+                            populatedMessage
+                        );
+                    }
+                } else if (conversation.type === "workspace" && conversation.workspace) {
+                    io.to(conversation.workspace.toString()).emit(
+                        "receive_message",
+                        populatedMessage
+                    );
+                }
 
                 // 4. Trigger in-app notification for recipient(s)
                 const snippet =
@@ -214,7 +256,7 @@ export const initSocket = (server) => {
                                 type: "new_message",
                                 title: `New message in ${project.name}`,
                                 message: `${socket.user.fullName}: ${snippet}`,
-                                link: `/workspaces/${project._id}`
+                                link: `/workspaces/${project._id}?tab=chat`
                             });
                         }
                     }
