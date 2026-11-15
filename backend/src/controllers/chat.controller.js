@@ -118,10 +118,11 @@ const getOrCreateWorkspaceConversation = asyncHandler(async (req, res) => {
 });
 
 const getUserConversations = asyncHandler(async (req, res) => {
-    // 1. Direct conversations
+    // 1. Direct conversations (only active chats where at least 1 message has been sent)
     const directConversations = await Conversation.find({
         type: "direct",
-        participants: req.user._id
+        participants: req.user._id,
+        lastMessage: { $exists: true, $ne: null }
     })
         .populate("participants", "username fullName email avatar headline")
         .populate({
