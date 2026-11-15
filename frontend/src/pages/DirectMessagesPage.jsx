@@ -139,6 +139,18 @@ export const DirectMessagesPage = () => {
   };
 
   const filteredConversations = conversations.filter((c) => {
+    // For direct chats: only show if at least 1 message has been sent
+    // OR if it is currently the active conversation being drafted
+    if (c.type === "direct") {
+      const hasMessage = Boolean(c.lastMessage);
+      const isCurrentlyActive =
+        activeConversation &&
+        c._id?.toString() === activeConversation._id?.toString();
+      if (!hasMessage && !isCurrentlyActive) {
+        return false;
+      }
+    }
+
     const details = getConversationDetails(c);
     return details.title.toLowerCase().includes(search.toLowerCase());
   });
