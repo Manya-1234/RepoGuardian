@@ -7,6 +7,7 @@ import {
     inviteWorkspaceMember,
     addProjectMember,
     removeProjectMember,
+    updateMemberRole,
     deleteProject,
     respondToWorkspaceInvitation,
     getMyWorkspaceInvitations,
@@ -44,6 +45,7 @@ router.route("/:projectId/invite").post(inviteWorkspaceMember);
 
 router.route("/:projectId/members").post(addProjectMember);
 router.route("/:projectId/members/:userId").delete(removeProjectMember);
+router.route("/:projectId/members/:userId/role").patch(updateMemberRole);
 
 export default router;
 

@@ -12,6 +12,7 @@ import chatRouter from "./routes/chat.routes.js";
 import notificationRouter from "./routes/notification.routes.js";
 import taskRouter from "./routes/task.routes.js";
 import githubRouter from "./routes/github.routes.js";
+import repositoryRagRouter from "./routes/repositoryRag.routes.js";
 
 const app = express();
 
@@ -45,6 +46,8 @@ app.use("/api/v1/chat", chatRouter);
 app.use("/api/v1/notifications", notificationRouter);
 app.use("/api/v1/tasks", taskRouter);
 app.use("/api/v1/github", githubRouter);
+app.use("/api/v1/repositories", repositoryRagRouter);
+app.use("/api/repositories", repositoryRagRouter);
 
 // Global error handling middleware (must be after all routes)
 app.use(errorMiddleware);

@@ -21,6 +21,11 @@ router.route("/my-tasks").get(getMyAssignedTasks);
 
 // Workspace tasks CRUD
 router
+    .route("/")
+    .post(createTask)
+    .get(getWorkspaceTasks);
+
+router
     .route("/workspace/:projectId")
     .post(createTask)
     .get(getWorkspaceTasks);

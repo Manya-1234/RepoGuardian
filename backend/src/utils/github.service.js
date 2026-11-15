@@ -51,13 +51,25 @@ export const parseGitHubUrl = (input) => {
 
 /**
  * Generic fetch wrapper for GitHub REST API with rate-limit and error handling.
+ * Automatically recovers from bad/expired tokens by retrying unauthenticated for public repositories.
  */
-const githubFetch = async (endpoint) => {
+const githubFetch = async (endpoint, customHeaders = null) => {
     const url = `${GITHUB_API_BASE}${endpoint}`;
     try {
-        const response = await fetch(url, {
-            headers: getHeaders()
+        const initialHeaders = customHeaders || getHeaders();
+        let response = await fetch(url, {
+            headers: initialHeaders
         });
+
+        // If a provided token failed with 401 Unauthorized (e.g. invalid or revoked GITHUB_TOKEN),
+        // retry once without Authorization header so public repositories never fail
+        if (response.status === 401 && initialHeaders.Authorization) {
+            const publicHeaders = {
+                Accept: "application/vnd.github.v3+json",
+                "User-Agent": "RepoGuardian-Application"
+            };
+            response = await fetch(url, { headers: publicHeaders });
+        }
 
         if (response.status === 404) {
             throw new ApiError(404, "Repository or resource not found on GitHub");
@@ -133,16 +145,30 @@ export const fetchCommits = async (owner, repo, branch = "main", limit = 15) => 
 
     const data = await githubFetch(endpoint);
 
-    return (data || []).map((c) => ({
-        sha: c.sha,
-        shortSha: c.sha ? c.sha.substring(0, 7) : "",
-        message: c.commit?.message || "No commit message",
-        authorName: c.commit?.author?.name || "Unknown",
-        authorUsername: c.author?.login || c.commit?.author?.name || "Unknown",
-        authorAvatar: c.author?.avatar_url || "",
-        date: c.commit?.author?.date,
-        url: c.html_url
-    }));
+    return (data || []).map((c) => {
+        const authorName = c.commit?.author?.name || c.author?.login || "Unknown";
+        const authorUsername = c.author?.login || c.commit?.author?.name || "Unknown";
+        const authorAvatar = c.author?.avatar_url || "";
+        const commitDate = c.commit?.author?.date || c.commit?.committer?.date || null;
+
+        return {
+            sha: c.sha,
+            shortSha: c.sha ? c.sha.substring(0, 7) : "",
+            message: c.commit?.message || "No commit message",
+            authorName,
+            authorUsername,
+            authorAvatar,
+            date: commitDate,
+            branch,
+            author: {
+                name: authorName,
+                login: authorUsername,
+                avatar_url: authorAvatar,
+                date: commitDate
+            },
+            url: c.html_url
+        };
+    });
 };
 
 /**
@@ -170,7 +196,7 @@ export const fetchPullRequests = async (owner, repo, state = "open") => {
 };
 
 /**
- * Fetches complete recursive Git tree (used by Codebase Intelligence in Phase 7).
+ * Fetches complete recursive Git tree (used by Codebase Intelligence).
  */
 export const fetchGitTree = async (owner, repo, branch = "main") => {
     const endpoint = `/repos/${owner}/${repo}/git/trees/${encodeURIComponent(
@@ -182,6 +208,7 @@ export const fetchGitTree = async (owner, repo, branch = "main") => {
     const items = (data.tree || []).map((item) => ({
         path: item.path,
         mode: item.mode,
+        sha: item.sha,
         type: item.type === "blob" ? "file" : "directory",
         size: item.size || 0
     }));
@@ -195,11 +222,56 @@ export const fetchGitTree = async (owner, repo, branch = "main") => {
 
 /**
  * Fetches raw text content of a file from repository.
+ * Tries raw.githubusercontent.com first (instantaneous, free, zero REST API rate-limits),
+ * with fallback to Git Blob API by SHA and contents REST endpoint.
  */
-export const fetchRawFileContent = async (owner, repo, filePath, branch = "main") => {
-    const endpoint = `/repos/${owner}/${repo}/contents/${encodeURIComponent(
-        filePath
-    )}?ref=${encodeURIComponent(branch)}`;
+export const fetchRawFileContent = async (owner, repo, filePath, branch = "main", fileSha = null) => {
+    // 1. Try public raw GitHub content CDN first (fastest, unauthenticated, zero REST API rate limit)
+    try {
+        const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${encodeURIComponent(branch)}/${filePath}`;
+        const rawResponse = await fetch(rawUrl, {
+            headers: { "User-Agent": "RepoGuardian-Application" }
+        });
+
+        if (rawResponse.ok) {
+            const textContent = await rawResponse.text();
+            return {
+                name: filePath.split("/").pop(),
+                path: filePath,
+                size: Buffer.byteLength(textContent),
+                content: textContent
+            };
+        }
+    } catch {
+        // Fall through to Git Blob / Contents API
+    }
+
+    // 2. Try Git Blob API directly if fileSha is provided
+    if (fileSha) {
+        try {
+            const blobData = await githubFetch(`/repos/${owner}/${repo}/git/blobs/${fileSha}`);
+            if (blobData && blobData.content) {
+                const encoding = blobData.encoding || "base64";
+                const decoded = Buffer.from(blobData.content, encoding).toString("utf-8");
+                return {
+                    name: filePath.split("/").pop(),
+                    path: filePath,
+                    size: blobData.size,
+                    content: decoded
+                };
+            }
+        } catch {
+            // Fall back to contents API if blob retrieval is unavailable
+        }
+    }
+
+    // 3. Safely encode path by individual segment, NOT by encoding slashes
+    const safePath = filePath
+        .split("/")
+        .map((segment) => encodeURIComponent(segment))
+        .join("/");
+
+    const endpoint = `/repos/${owner}/${repo}/contents/${safePath}?ref=${encodeURIComponent(branch)}`;
 
     const data = await githubFetch(endpoint);
 

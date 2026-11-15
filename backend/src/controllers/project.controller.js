@@ -273,10 +273,18 @@ const removeProjectMember = asyncHandler(async (req, res) => {
         );
     }
 
-    const memberExists = project.members.some((m) => m.user.equals(userId));
+    const targetMember = project.members.find((m) => m.user.equals(userId));
 
-    if (!memberExists) {
+    if (!targetMember) {
         throw new ApiError(404, "Member not found in this project");
+    }
+
+    // Admins cannot remove other admins (only owner can)
+    if (!isSelf && !isOwner && targetMember.role === "admin") {
+        throw new ApiError(
+            403,
+            "Admins cannot remove other admins. Only the owner can remove admins."
+        );
     }
 
     project.members = project.members.filter((m) => !m.user.equals(userId));
@@ -286,11 +294,83 @@ const removeProjectMember = asyncHandler(async (req, res) => {
         .populate("owner", "username fullName email avatar")
         .populate("members.user", "username fullName email avatar");
 
+    try {
+        const io = getIO();
+        io.to(projectId.toString()).emit("workspace_updated", updatedProject);
+        io.to(projectId.toString()).emit("member_removed", { projectId, userId, workspace: updatedProject });
+    } catch {
+        // Non-blocking
+    }
+
     return res
         .status(200)
         .json(
             new ApiResponse(200, updatedProject, "Member removed successfully")
         );
+});
+
+const updateMemberRole = asyncHandler(async (req, res) => {
+    const { projectId, userId } = req.params;
+    const { role } = req.body;
+
+    if (
+        !mongoose.isValidObjectId(projectId) ||
+        !mongoose.isValidObjectId(userId)
+    ) {
+        throw new ApiError(400, "Invalid project ID or user ID format");
+    }
+
+    if (!["admin", "member"].includes(role)) {
+        throw new ApiError(400, "Role must be either 'admin' or 'member'");
+    }
+
+    const project = await Project.findById(projectId);
+
+    if (!project) {
+        throw new ApiError(404, "Project not found");
+    }
+
+    // Only owner can promote to admin or demote from admin
+    const isOwner = project.owner.equals(req.user._id);
+    if (!isOwner) {
+        throw new ApiError(
+            403,
+            "Access denied: Only the workspace owner can change member roles"
+        );
+    }
+
+    if (project.owner.equals(userId)) {
+        throw new ApiError(400, "Cannot change the workspace owner's role");
+    }
+
+    const member = project.members.find((m) => m.user.equals(userId));
+    if (!member) {
+        throw new ApiError(404, "Member not found in this workspace");
+    }
+
+    member.role = role;
+    await project.save();
+
+    const updatedProject = await Project.findById(projectId)
+        .populate("owner", "username fullName email avatar")
+        .populate("members.user", "username fullName email avatar");
+
+    try {
+        const io = getIO();
+        io.to(projectId.toString()).emit("workspace_updated", updatedProject);
+        io.to(projectId.toString()).emit("member_role_updated", {
+            projectId,
+            userId,
+            newRole: role,
+            workspace: updatedProject
+        });
+    } catch {
+        // Non-blocking
+    }
+
+    return res.status(200).json(
+        new ApiResponse(200, updatedProject, `Member role updated to ${role} successfully`)
+    );
 });
 
 const deleteProject = asyncHandler(async (req, res) => {
@@ -499,6 +579,7 @@ export {
     inviteWorkspaceMember,
     addProjectMember,
     removeProjectMember,
+    updateMemberRole,
     deleteProject,
     respondToWorkspaceInvitation,
     getMyWorkspaceInvitations,

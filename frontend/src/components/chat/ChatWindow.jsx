@@ -44,13 +44,34 @@ export const ChatWindow = ({ conversationId, title = "Chat", placeholder = "Type
   useEffect(() => {
     if (!socket || !conversationId) return;
 
-    // Join room
-    socket.emit("join_chat", conversationId);
+    const joinRoom = () => {
+      socket.emit("join_chat", conversationId);
+    };
+
+    // Join room immediately
+    joinRoom();
+
+    // Re-join if socket reconnects
+    socket.on("connect", joinRoom);
 
     const handleReceiveMessage = (msg) => {
       const msgConvoId = (msg.conversation?._id || msg.conversation)?.toString();
       if (msgConvoId === conversationId?.toString()) {
         setMessages((prev) => {
+          // If there is an optimistic placeholder from this user with same content, replace it
+          const optimisticIdx = prev.findIndex(
+            (m) =>
+              m._isOptimistic &&
+              (m.sender?._id || m.sender)?.toString() === (msg.sender?._id || msg.sender)?.toString() &&
+              m.content === msg.content
+          );
+
+          if (optimisticIdx !== -1) {
+            const updated = [...prev];
+            updated[optimisticIdx] = msg;
+            return updated;
+          }
+
           if (prev.some((m) => m._id === msg._id)) return prev;
           return [...prev, msg];
         });
@@ -81,6 +102,7 @@ export const ChatWindow = ({ conversationId, title = "Chat", placeholder = "Type
     socket.on("user_stop_typing", handleUserStopTyping);
 
     return () => {
+      socket.off("connect", joinRoom);
       socket.emit("leave_chat", conversationId);
       socket.off("receive_message", handleReceiveMessage);
       socket.off("user_typing", handleUserTyping);
@@ -100,19 +122,47 @@ export const ChatWindow = ({ conversationId, title = "Chat", placeholder = "Type
     }, 1500);
   };
 
-  const handleSendMessage = (e) => {
+  const handleSendMessage = async (e) => {
     e.preventDefault();
     const content = newMessage.trim();
-    if (!content || !socket || !conversationId) return;
+    if (!content || !conversationId) return;
 
-    // Emit live message event
-    socket.emit("send_message", {
-      conversationId,
+    // 1. Optimistic message for immediate real-time feedback
+    const tempId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const optimisticMsg = {
+      _id: tempId,
+      conversation: conversationId,
+      sender: user,
       content,
-    });
+      createdAt: new Date().toISOString(),
+      _isOptimistic: true,
+    };
 
-    socket.emit("stop_typing", { conversationId });
+    setMessages((prev) => [...prev, optimisticMsg]);
     setNewMessage("");
+    setTimeout(scrollToBottom, 50);
+
+    // 2. Emit live message event via socket
+    if (socket && socket.connected) {
+      socket.emit("send_message", {
+        conversationId,
+        content,
+      });
+      socket.emit("stop_typing", { conversationId });
+    } else {
+      // 3. Fallback to HTTP REST endpoint if socket is not currently connected
+      try {
+        const res = await chatApi.sendMessage(conversationId, content);
+        const savedMsg = res.data;
+        if (savedMsg) {
+          setMessages((prev) =>
+            prev.map((m) => (m._id === tempId ? savedMsg : m))
+          );
+        }
+      } catch (err) {
+        console.error("Failed to send message:", err);
+      }
+    }
   };
 
   return (

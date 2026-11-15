@@ -63,6 +63,11 @@ const taskSchema = new Schema(
                 trim: true,
                 default: ""
             },
+            url: {
+                type: String,
+                trim: true,
+                default: ""
+            },
             issueNumber: {
                 type: Number,
                 default: null

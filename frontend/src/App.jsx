@@ -21,6 +21,11 @@ const ProjectsRedirect = () => {
   return <Navigate to={`/workspaces/${id}`} replace />;
 };
 
+const WorkspaceChatRedirect = () => {
+  const { id } = useParams();
+  return <Navigate to={`/workspaces/${id}?tab=chat`} replace />;
+};
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -71,10 +76,26 @@ export default function App() {
                   }
                 />
                 <Route
+                  path="/opportunities/:id"
+                  element={
+                    <ProtectedRoute>
+                      <OpportunitiesPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
                   path="/messages"
                   element={
                     <ProtectedRoute>
                       <DirectMessagesPage />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/chat/workspace/:id"
+                  element={
+                    <ProtectedRoute>
+                      <WorkspaceChatRedirect />
                     </ProtectedRoute>
                   }
                 />

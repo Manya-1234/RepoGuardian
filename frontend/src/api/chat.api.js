@@ -6,4 +6,6 @@ export const chatApi = {
   getWorkspaceChat: (workspaceId) => api.get(`/chat/workspace/${workspaceId}`),
   getMessages: (conversationId, params = {}) =>
     api.get(`/chat/${conversationId}/messages`, { params }),
+  sendMessage: (conversationId, content) =>
+    api.post(`/chat/${conversationId}/messages`, { content }),
 };

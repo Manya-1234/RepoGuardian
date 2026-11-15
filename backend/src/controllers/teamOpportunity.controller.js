@@ -386,14 +386,32 @@ const deleteOpportunity = asyncHandler(async (req, res) => {
 const getMyOpportunities = asyncHandler(async (req, res) => {
     const opportunities = await TeamOpportunity.find({ creator: req.user._id })
         .populate("workspace", "name description githubRepo status")
-        .sort({ updatedAt: -1 });
+        .sort({ updatedAt: -1 })
+        .lean();
+
+    const oppIds = opportunities.map((o) => o._id);
+    const applications = await TeamApplication.find({
+        opportunity: { $in: oppIds }
+    }).select("opportunity status type");
+
+    const enriched = opportunities.map((opp) => {
+        const oppApps = applications.filter(
+            (a) => a.opportunity.toString() === opp._id.toString()
+        );
+        const pendingCount = oppApps.filter((a) => a.status === "pending").length;
+        return {
+            ...opp,
+            applicationsCount: oppApps.length,
+            pendingApplicationsCount: pendingCount
+        };
+    });
 
     return res
         .status(200)
         .json(
             new ApiResponse(
                 200,
-                opportunities,
+                enriched,
                 "Your opportunities fetched successfully"
             )
         );
