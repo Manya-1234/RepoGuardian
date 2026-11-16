@@ -290,13 +290,22 @@ const respondToApplication = asyncHandler(async (req, res) => {
         .populate("reviewedBy", "username fullName email");
 
     const notifyRecipient = isCreator ? application.candidate : opportunity.creator;
+    const isCandidateBeingNotified = isCreator;
+    const targetLink = isCandidateBeingNotified
+        ? `/opportunities?tab=applied`
+        : `/opportunities?tab=my&opportunityId=${opportunity._id}`;
+
     await createAndEmitNotification({
         recipient: notifyRecipient,
         sender: req.user._id,
         type: action === "accept" ? "request_accepted" : "request_rejected",
-        title: `Application ${newStatus}`,
-        message: `${req.user.fullName} has ${newStatus} the ${application.type === "invitation" ? "invitation" : "join request"} for "${opportunity.title}"`,
-        link: `/opportunities?tab=my&opportunityId=${opportunity._id}`
+        title: isCandidateBeingNotified
+            ? `Application ${action === "accept" ? "Accepted!" : "Not Selected"}`
+            : `Invitation ${action === "accept" ? "Accepted" : "Declined"}`,
+        message: isCandidateBeingNotified
+            ? `Your application for "${application.role || "Team Member"}" on "${opportunity.title}" has been ${newStatus}.`
+            : `${req.user.fullName} has ${newStatus} the invitation for "${opportunity.title}"`,
+        link: targetLink
     });
 
     return res
@@ -329,10 +338,14 @@ const getMyApplications = asyncHandler(async (req, res) => {
     }
 
     const applications = await TeamApplication.find(query)
-        .populate(
-            "opportunity",
-            "title description skillsRequired expectedCommitment status workspace"
-        )
+        .populate({
+            path: "opportunity",
+            select: "title description skillsRequired expectedCommitment status workspace creator",
+            populate: [
+                { path: "creator", select: "username fullName email avatar headline" },
+                { path: "workspace", select: "name description" }
+            ]
+        })
         .populate("candidate", "username fullName email avatar headline skills")
         .populate("sender", "username fullName email avatar headline")
         .sort({ updatedAt: -1 });

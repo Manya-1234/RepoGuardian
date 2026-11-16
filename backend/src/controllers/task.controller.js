@@ -110,7 +110,7 @@ const createTask = asyncHandler(async (req, res) => {
             type: "task_assigned",
             title: "New Task Assigned",
             message: `${req.user.fullName} assigned you a task: "${task.title}" in ${project.name}`,
-            link: `/projects/${project._id}`
+            link: `/workspaces/${project._id}?tab=kanban`
         });
     }
 
@@ -253,7 +253,7 @@ const getTaskById = asyncHandler(async (req, res) => {
 
 const updateTask = asyncHandler(async (req, res) => {
     const { taskId } = req.params;
-    const { title, description, priority, status, dueDate, tags, github } = req.body;
+    const { title, description, priority, status, dueDate, tags, github, assignedTo } = req.body;
 
     if (!mongoose.isValidObjectId(taskId)) {
         throw new ApiError(400, "Invalid task ID format");
@@ -293,6 +293,41 @@ const updateTask = asyncHandler(async (req, res) => {
     if (priority && ["low", "medium", "high", "urgent"].includes(priority)) {
         task.priority = priority;
     }
+
+    // Handle Assignee updates
+    let assigneeNotificationNeeded = false;
+    let newAssigneeId = null;
+
+    if (assignedTo !== undefined) {
+        if (!assignedTo || assignedTo === "" || assignedTo === "unassigned") {
+            task.assignedTo = null;
+        } else {
+            if (!mongoose.isValidObjectId(assignedTo)) {
+                throw new ApiError(400, "Invalid assigned user ID format");
+            }
+            const isAssigneeInWorkspace =
+                project.owner.equals(assignedTo) ||
+                project.members.some((m) => m.user.equals(assignedTo));
+
+            if (!isAssigneeInWorkspace) {
+                throw new ApiError(
+                    400,
+                    "Assigned user must be an active member of this workspace"
+                );
+            }
+
+            const isDifferentAssignee =
+                !task.assignedTo || !task.assignedTo.equals(assignedTo);
+
+            task.assignedTo = assignedTo;
+
+            if (isDifferentAssignee && !req.user._id.equals(assignedTo)) {
+                assigneeNotificationNeeded = true;
+                newAssigneeId = assignedTo;
+            }
+        }
+    }
+
     const oldStatus = task.status;
     if (status && ["todo", "in_progress", "in_review", "done"].includes(status)) {
         task.status = status;
@@ -307,7 +342,7 @@ const updateTask = asyncHandler(async (req, res) => {
                 type: "task_status_changed",
                 title: `Task Marked as ${status.replace("_", " ").toUpperCase()}`,
                 message: `${req.user.fullName} moved task "${task.title}" to ${status.replace("_", " ")}`,
-                link: `/workspaces/${project._id}`
+                link: `/workspaces/${project._id}?tab=kanban`
             });
         }
     }
@@ -327,9 +362,22 @@ const updateTask = asyncHandler(async (req, res) => {
 
     await task.save();
 
+    // Notify newly assigned teammate
+    if (assigneeNotificationNeeded && newAssigneeId) {
+        await createAndEmitNotification({
+            recipient: newAssigneeId,
+            sender: req.user._id,
+            type: "task_assigned",
+            title: "Task Assigned to You",
+            message: `${req.user.fullName} assigned you to task "${task.title}" in ${project.name}`,
+            link: `/workspaces/${project._id}?tab=kanban`
+        });
+    }
+
     const updatedTask = await Task.findById(taskId)
         .populate("assignedTo", "username fullName avatar headline")
-        .populate("createdBy", "username fullName avatar");
+        .populate("createdBy", "username fullName avatar")
+        .populate("project", "name description");
 
     try {
         const io = getIO();
@@ -414,7 +462,7 @@ const updateTaskStatus = asyncHandler(async (req, res) => {
             type: "task_status_changed",
             title: `Task Marked as ${status.replace("_", " ").toUpperCase()}`,
             message: `${req.user.fullName} moved task "${task.title}" to ${status.replace("_", " ")}`,
-            link: `/projects/${project._id}`
+            link: `/workspaces/${project._id}?tab=kanban`
         });
     }
 
@@ -511,7 +559,7 @@ const reassignTask = asyncHandler(async (req, res) => {
             type: "task_reassigned",
             title: "Task Reassigned to You",
             message: `${req.user.fullName} reassigned task "${task.title}" to you in ${project.name}`,
-            link: `/projects/${project._id}`
+            link: `/workspaces/${project._id}?tab=kanban`
         });
     }
 
