@@ -18,6 +18,9 @@ import {
   X,
   ExternalLink,
   Calendar,
+  Inbox,
+  XCircle,
+  Send,
 } from "lucide-react";
 import { opportunityApi } from "../api/opportunity.api";
 import { projectApi } from "../api/project.api";
@@ -34,10 +37,13 @@ export const OpportunitiesPage = () => {
   const { id: routeOppId } = useParams();
   const [searchParams] = useSearchParams();
 
-  const [activeTab, setActiveTab] = useState("all"); // 'all' | 'recommended' | 'my'
+  const [activeTab, setActiveTab] = useState("all"); // 'all' | 'recommended' | 'my' | 'applied'
   const [recommended, setRecommended] = useState([]);
   const [allOpportunities, setAllOpportunities] = useState([]);
   const [myPostings, setMyPostings] = useState([]);
+  const [myApplications, setMyApplications] = useState([]);
+  const [applicationStatusFilter, setApplicationStatusFilter] = useState("all");
+  const [withdrawingId, setWithdrawingId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
 
@@ -116,6 +122,12 @@ export const OpportunitiesPage = () => {
           ? res.data
           : res.data?.opportunities || [];
         setMyPostings(list);
+      } else if (activeTab === "applied") {
+        const res = await applicationApi.getMyApplications();
+        const list = Array.isArray(res.data)
+          ? res.data
+          : res.data?.applications || [];
+        setMyApplications(list);
       } else {
         const res = await opportunityApi.getOpportunities({ search });
         const list = Array.isArray(res.data)
@@ -127,6 +139,23 @@ export const OpportunitiesPage = () => {
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleWithdrawApplication = async (applicationId) => {
+    if (!window.confirm("Are you sure you want to withdraw this application?")) return;
+    try {
+      setWithdrawingId(applicationId);
+      await applicationApi.respondApplication(applicationId, "withdraw");
+      setMyApplications((prev) =>
+        prev.map((app) =>
+          app._id === applicationId ? { ...app, status: "withdrawn" } : app
+        )
+      );
+    } catch (err) {
+      alert(err.response?.data?.message || err.message || "Failed to withdraw application");
+    } finally {
+      setWithdrawingId(null);
     }
   };
 
@@ -156,8 +185,14 @@ export const OpportunitiesPage = () => {
   useEffect(() => {
     const oppId = routeOppId || searchParams.get("opportunityId");
     const tabParam = searchParams.get("tab");
-    if (tabParam === "my" || oppId) {
+    if (tabParam === "applied") {
+      setActiveTab("applied");
+    } else if (tabParam === "my" || oppId) {
       setActiveTab("my");
+    } else if (tabParam === "recommended") {
+      setActiveTab("recommended");
+    } else if (tabParam === "all") {
+      setActiveTab("all");
     }
   }, [routeOppId, searchParams]);
 
@@ -362,6 +397,22 @@ export const OpportunitiesPage = () => {
     return true;
   });
 
+  const myAppliedList = myApplications.filter((app) => {
+    const candId = (app.candidate?._id || app.candidate)?.toString();
+    const senderId = (app.sender?._id || app.sender)?.toString();
+    const currentId = (user?._id || user?.id)?.toString();
+    return (candId === currentId || senderId === currentId) && app.type === "join_request";
+  });
+
+  const filteredAppliedList = myAppliedList.filter((app) => {
+    if (applicationStatusFilter === "all") return true;
+    return app.status === applicationStatusFilter;
+  });
+
+  const pendingCount = myAppliedList.filter((a) => a.status === "pending").length;
+  const acceptedCount = myAppliedList.filter((a) => a.status === "accepted").length;
+  const rejectedCount = myAppliedList.filter((a) => a.status === "rejected").length;
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
       {/* Header */}
@@ -392,10 +443,10 @@ export const OpportunitiesPage = () => {
       </div>
 
       {/* Tabs */}
-      <div className="flex items-center gap-2 border-b border-slate-800 pb-3 mb-6">
+      <div className="flex items-center gap-2 border-b border-slate-800 pb-3 mb-6 overflow-x-auto">
         <button
           onClick={() => setActiveTab("all")}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition ${
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition ${
             activeTab === "all"
               ? "bg-slate-800 text-slate-200 border border-slate-700 shadow-sm"
               : "text-slate-400 hover:text-slate-200"
@@ -407,7 +458,7 @@ export const OpportunitiesPage = () => {
 
         <button
           onClick={() => setActiveTab("recommended")}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition ${
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition ${
             activeTab === "recommended"
               ? "bg-indigo-600/20 text-indigo-400 border border-indigo-500/40 shadow-sm"
               : "text-slate-400 hover:text-slate-200"
@@ -418,8 +469,25 @@ export const OpportunitiesPage = () => {
         </button>
 
         <button
+          onClick={() => setActiveTab("applied")}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition ${
+            activeTab === "applied"
+              ? "bg-emerald-600/20 text-emerald-400 border border-emerald-500/40 shadow-sm"
+              : "text-slate-400 hover:text-slate-200"
+          }`}
+        >
+          <Send className="w-4 h-4 text-emerald-400" />
+          <span>My Applications</span>
+          {pendingCount > 0 && (
+            <span className="px-1.5 py-0.5 rounded-full bg-amber-500 text-slate-950 text-[10px] font-bold">
+              {pendingCount}
+            </span>
+          )}
+        </button>
+
+        <button
           onClick={() => setActiveTab("my")}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold transition ${
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition ${
             activeTab === "my"
               ? "bg-purple-600/20 text-purple-400 border border-purple-500/40 shadow-sm"
               : "text-slate-400 hover:text-slate-200"
@@ -670,6 +738,243 @@ export const OpportunitiesPage = () => {
             })}
           </div>
         )
+      ) : activeTab === "applied" ? (
+        <div className="space-y-6">
+          {/* Status Filter Chips */}
+          <div className="flex items-center gap-2 flex-wrap pb-2 border-b border-slate-800/80">
+            {[
+              { id: "all", label: "All Applications", count: myAppliedList.length },
+              { id: "pending", label: "Pending", count: pendingCount },
+              { id: "accepted", label: "Accepted", count: acceptedCount },
+              { id: "rejected", label: "Rejected", count: rejectedCount },
+            ].map((f) => (
+              <button
+                key={f.id}
+                onClick={() => setApplicationStatusFilter(f.id)}
+                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition ${
+                  applicationStatusFilter === f.id
+                    ? "bg-slate-800 text-white border border-slate-700 shadow-sm"
+                    : "bg-slate-950/60 text-slate-400 hover:text-slate-200 border border-slate-800/60"
+                }`}
+              >
+                <span>{f.label}</span>
+                <span
+                  className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                    applicationStatusFilter === f.id
+                      ? "bg-indigo-600 text-white"
+                      : "bg-slate-800 text-slate-400"
+                  }`}
+                >
+                  {f.count}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          {filteredAppliedList.length === 0 ? (
+            <div className="py-16 text-center bg-slate-900 border border-slate-800 rounded-3xl p-8 max-w-md mx-auto shadow-xl">
+              <Inbox className="w-10 h-10 text-slate-500 mx-auto mb-3" />
+              <h3 className="text-base font-semibold text-slate-200">
+                {myAppliedList.length === 0
+                  ? "No applications submitted yet"
+                  : `No ${applicationStatusFilter} applications`}
+              </h3>
+              <p className="text-xs text-slate-400 mt-1 mb-6">
+                {myAppliedList.length === 0
+                  ? "Explore open opportunities and join exciting project workspaces with other developers!"
+                  : `You do not have any applications currently marked as ${applicationStatusFilter}.`}
+              </p>
+              {myAppliedList.length === 0 ? (
+                <button
+                  onClick={() => setActiveTab("all")}
+                  className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition"
+                >
+                  Browse Openings
+                </button>
+              ) : (
+                <button
+                  onClick={() => setApplicationStatusFilter("all")}
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition"
+                >
+                  Show All Applications
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {filteredAppliedList.map((app) => {
+                const opp = app.opportunity || {};
+                const creator = opp.creator || {};
+                const ws = opp.workspace || {};
+                const wsId = (ws._id || ws)?.toString();
+
+                const statusBadgeVariant =
+                  app.status === "accepted"
+                    ? "emerald"
+                    : app.status === "rejected"
+                    ? "rose"
+                    : app.status === "pending"
+                    ? "amber"
+                    : "slate";
+
+                const StatusIcon =
+                  app.status === "accepted"
+                    ? CheckCircle2
+                    : app.status === "rejected"
+                    ? XCircle
+                    : app.status === "pending"
+                    ? Clock
+                    : RotateCcw;
+
+                return (
+                  <div
+                    key={app._id}
+                    className="bg-slate-900 border border-slate-800 hover:border-slate-700 rounded-3xl p-6 shadow-xl flex flex-col justify-between transition group"
+                  >
+                    <div>
+                      {/* Top Bar: Opportunity & Status */}
+                      <div className="flex items-start justify-between gap-3 mb-3">
+                        <div className="min-w-0">
+                          {ws.name && (
+                            <span className="text-[11px] font-semibold text-indigo-400 uppercase tracking-wider block truncate">
+                              {ws.name}
+                            </span>
+                          )}
+                          <h3 className="text-base font-bold text-slate-100 group-hover:text-indigo-400 transition mt-0.5 truncate">
+                            {opp.title || "Project Opportunity"}
+                          </h3>
+                        </div>
+                        <Badge variant={statusBadgeVariant} size="xs" className="flex items-center gap-1 shrink-0 capitalize">
+                          <StatusIcon className="w-3 h-3" />
+                          <span>{app.status === "pending" ? "Pending Review" : app.status}</span>
+                        </Badge>
+                      </div>
+
+                      {/* Opportunity description snippet */}
+                      {opp.description && (
+                        <p className="text-xs text-slate-400 line-clamp-2 mb-3 leading-relaxed">
+                          {opp.description}
+                        </p>
+                      )}
+
+                      {/* Creator Info & Role Applied */}
+                      <div className="p-3 rounded-2xl bg-slate-950/70 border border-slate-800/80 mb-3 space-y-2">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-slate-400">Role Applied:</span>
+                          <span className="font-semibold text-slate-200">
+                            {app.role || "Team Member"}
+                          </span>
+                        </div>
+
+                        {creator.fullName && (
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-slate-400">Posted by:</span>
+                            <div className="flex items-center gap-1.5">
+                              <img
+                                src={
+                                  creator.avatar ||
+                                  `https://api.dicebear.com/7.x/identicon/svg?seed=${creator.username || "creator"}`
+                                }
+                                alt={creator.username}
+                                className="w-4 h-4 rounded-full object-cover border border-slate-700"
+                              />
+                              <span className="text-slate-300 font-medium">
+                                {creator.fullName || creator.username}
+                              </span>
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="flex items-center justify-between text-[11px] text-slate-400">
+                          <span>Submitted:</span>
+                          <span>{new Date(app.createdAt).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })}</span>
+                        </div>
+                      </div>
+
+                      {/* User's Pitch Message if present */}
+                      {app.message && (
+                        <div className="p-3 rounded-xl bg-slate-950/40 border border-slate-800/60 mb-4">
+                          <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">
+                            Your Message
+                          </span>
+                          <p className="text-xs text-slate-300 italic line-clamp-2">
+                            "{app.message}"
+                          </p>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Card Actions Footer */}
+                    <div className="pt-4 border-t border-slate-800/80 flex items-center justify-between flex-wrap gap-2">
+                      <div>
+                        {app.status === "accepted" && (
+                          <span className="text-[11px] text-emerald-400 font-medium flex items-center gap-1">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            Joined Workspace
+                          </span>
+                        )}
+                        {app.status === "rejected" && (
+                          <span className="text-[11px] text-rose-400 font-medium flex items-center gap-1">
+                            <XCircle className="w-3.5 h-3.5" />
+                            Not Selected
+                          </span>
+                        )}
+                        {app.status === "pending" && (
+                          <span className="text-[11px] text-amber-400 font-medium flex items-center gap-1">
+                            <Clock className="w-3.5 h-3.5" />
+                            Awaiting Review
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        {/* If accepted and workspace exists, direct access to workspace! */}
+                        {app.status === "accepted" && wsId && (
+                          <Link
+                            to={`/workspaces/${wsId}`}
+                            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-md shadow-emerald-600/30 transition"
+                          >
+                            <span>Open Workspace</span>
+                            <ExternalLink className="w-3.5 h-3.5" />
+                          </Link>
+                        )}
+
+                        {/* If pending, option to withdraw */}
+                        {app.status === "pending" && (
+                          <button
+                            onClick={() => handleWithdrawApplication(app._id)}
+                            disabled={withdrawingId === app._id}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition disabled:opacity-50"
+                          >
+                            {withdrawingId === app._id ? (
+                              <LoadingSpinner size="xs" />
+                            ) : (
+                              <>
+                                <RotateCcw className="w-3.5 h-3.5" />
+                                <span>Withdraw</span>
+                              </>
+                            )}
+                          </button>
+                        )}
+
+                        {/* Chat with Creator */}
+                        {(creator._id || creator.id) && (
+                          <Link
+                            to={`/messages?user=${creator._id || creator.id}`}
+                            className="p-1.5 rounded-xl bg-slate-950 border border-slate-800 text-slate-400 hover:text-indigo-400 transition"
+                            title="Direct Message Project Creator"
+                          >
+                            <MessageSquare className="w-3.5 h-3.5" />
+                          </Link>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       ) : activeTab === "my" ? (
         myPostings.length === 0 ? (
           <div className="py-16 text-center bg-slate-900 border border-slate-800 rounded-3xl p-8 max-w-md mx-auto shadow-xl">

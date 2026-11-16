@@ -11,17 +11,23 @@ import {
   UserPlus,
   Check,
   X,
+  Trash2,
 } from "lucide-react";
 import { projectApi } from "../api/project.api";
+import { useAuth } from "../context/AuthContext";
 import { Modal } from "../components/common/Modal";
 import { LoadingSpinner } from "../components/common/LoadingSpinner";
 import { Badge } from "../components/common/Badge";
 
 export const WorkspacesPage = () => {
+  const { user } = useAuth();
   const [workspaces, setWorkspaces] = useState([]);
   const [pendingInvitations, setPendingInvitations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [deletingWorkspace, setDeletingWorkspace] = useState(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
   const [createForm, setCreateForm] = useState({
     name: "",
     description: "",
@@ -78,6 +84,21 @@ export const WorkspacesPage = () => {
       fetchWorkspacesAndInvites();
     } catch (err) {
       alert(err.message || "Failed to respond to invitation");
+    }
+  };
+
+  const handleDeleteWorkspace = async () => {
+    if (!deletingWorkspace) return;
+    try {
+      setDeleteLoading(true);
+      setDeleteError("");
+      await projectApi.deleteProject(deletingWorkspace._id);
+      setWorkspaces((prev) => prev.filter((w) => w._id !== deletingWorkspace._id));
+      setDeletingWorkspace(null);
+    } catch (err) {
+      setDeleteError(err.response?.data?.message || err.message || "Failed to delete workspace");
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -293,13 +314,25 @@ export const WorkspacesPage = () => {
                   </span>
                 </div>
 
-                <Link
-                  to={`/workspaces/${ws._id}`}
-                  className="flex items-center gap-1 px-3.5 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white text-xs font-semibold transition"
-                >
-                  <span>Open</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </Link>
+                <div className="flex items-center gap-2">
+                  {(ws.owner?._id || ws.owner)?.toString() ===
+                    (user?._id || user?.id)?.toString() && (
+                    <button
+                      onClick={() => setDeletingWorkspace(ws)}
+                      className="p-1.5 rounded-xl border border-rose-900/40 bg-rose-950/20 hover:bg-rose-950/60 text-rose-400 hover:text-rose-300 transition"
+                      title="Delete workspace"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  <Link
+                    to={`/workspaces/${ws._id}`}
+                    className="flex items-center gap-1 px-3.5 py-1.5 rounded-xl bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white text-xs font-semibold transition"
+                  >
+                    <span>Open</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </Link>
+                </div>
               </div>
             </div>
           ))}
@@ -382,6 +415,65 @@ export const WorkspacesPage = () => {
             </button>
           </div>
         </form>
+      </Modal>
+      {/* Delete Workspace Confirmation Modal */}
+      <Modal
+        isOpen={Boolean(deletingWorkspace)}
+        onClose={() => {
+          if (!deleteLoading) {
+            setDeletingWorkspace(null);
+            setDeleteError("");
+          }
+        }}
+        title="Delete Workspace"
+      >
+        <div className="space-y-4">
+          {deleteError && (
+            <div className="p-3 bg-rose-950/40 border border-rose-800 text-rose-300 text-xs rounded-xl">
+              {deleteError}
+            </div>
+          )}
+
+          <div className="p-4 rounded-2xl bg-rose-950/20 border border-rose-900/40 text-xs text-rose-300 space-y-2">
+            <p className="font-semibold text-rose-200">
+              Warning: This action is permanent and cannot be undone.
+            </p>
+            <p className="text-rose-300/80">
+              Deleting workspace{" "}
+              <strong className="text-white">"{deletingWorkspace?.name}"</strong>{" "}
+              will permanently remove all associated Kanban tasks, team chat messages, and member invitations.
+            </p>
+          </div>
+
+          <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+            <button
+              type="button"
+              disabled={deleteLoading}
+              onClick={() => {
+                setDeletingWorkspace(null);
+                setDeleteError("");
+              }}
+              className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-slate-200"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={deleteLoading}
+              onClick={handleDeleteWorkspace}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold transition disabled:opacity-50"
+            >
+              {deleteLoading ? (
+                <LoadingSpinner size="sm" />
+              ) : (
+                <>
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Delete Workspace</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
       </Modal>
     </div>
   );

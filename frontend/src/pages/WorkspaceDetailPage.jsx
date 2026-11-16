@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { useParams, Link, useSearchParams } from "react-router-dom";
+import { useParams, Link, useSearchParams, useNavigate } from "react-router-dom";
 import {
   LayoutGrid,
   CheckCircle2,
@@ -29,9 +29,14 @@ import { LoadingSpinner } from "../components/common/LoadingSpinner";
 
 export const WorkspaceDetailPage = () => {
   const { id } = useParams();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { user: currentUser } = useAuth();
   const { socket } = useSocket();
+
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
 
   const tabFromQuery = searchParams.get("tab");
   const [workspace, setWorkspace] = useState(null);
@@ -125,15 +130,24 @@ export const WorkspaceDetailPage = () => {
       }
     };
 
+    const handleWorkspaceDeleted = ({ projectId }) => {
+      if (projectId?.toString() === id.toString()) {
+        alert("This workspace has been deleted by the owner.");
+        navigate("/workspaces");
+      }
+    };
+
     socket.on("workspace_updated", handleWorkspaceUpdated);
     socket.on("member_removed", handleMemberRemoved);
     socket.on("member_role_updated", handleMemberRoleUpdated);
+    socket.on("workspace_deleted", handleWorkspaceDeleted);
 
     return () => {
       socket.emit("leave_workspace", id);
       socket.off("workspace_updated", handleWorkspaceUpdated);
       socket.off("member_removed", handleMemberRemoved);
       socket.off("member_role_updated", handleMemberRoleUpdated);
+      socket.off("workspace_deleted", handleWorkspaceDeleted);
     };
   }, [socket, id]);
 
@@ -243,6 +257,20 @@ export const WorkspaceDetailPage = () => {
     }
   };
 
+  const handleDeleteWorkspace = async () => {
+    try {
+      setDeleteLoading(true);
+      setDeleteError("");
+      await projectApi.deleteProject(id);
+      setIsDeleteModalOpen(false);
+      navigate("/workspaces");
+    } catch (err) {
+      setDeleteError(err.response?.data?.message || err.message || "Failed to delete workspace");
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-[70vh] flex items-center justify-center">
@@ -272,13 +300,23 @@ export const WorkspaceDetailPage = () => {
         </Link>
 
         {isOwner && (
-          <button
-            onClick={() => setIsInviteOpen(true)}
-            className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition shadow-md shadow-indigo-600/30"
-          >
-            <UserPlus className="w-4 h-4" />
-            <span>Invite Member</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setIsInviteOpen(true)}
+              className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold transition shadow-md shadow-indigo-600/30"
+            >
+              <UserPlus className="w-4 h-4" />
+              <span>Invite Member</span>
+            </button>
+            <button
+              onClick={() => setIsDeleteModalOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-rose-900/40 bg-rose-950/20 hover:bg-rose-950/50 text-rose-400 hover:text-rose-300 text-xs font-semibold transition"
+              title="Delete workspace"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Delete Workspace</span>
+            </button>
+          </div>
         )}
       </div>
 
@@ -570,6 +608,65 @@ export const WorkspaceDetailPage = () => {
             </button>
           </div>
         </form>
+      </Modal>
+
+      {/* Delete Workspace Confirmation Modal */}
+      <Modal
+        isOpen={isDeleteModalOpen}
+        onClose={() => {
+          if (!deleteLoading) {
+            setIsDeleteModalOpen(false);
+            setDeleteError("");
+          }
+        }}
+        title="Delete Workspace"
+      >
+        <div className="space-y-4">
+          {deleteError && (
+            <div className="p-3 bg-rose-950/40 border border-rose-800 text-rose-300 text-xs rounded-xl">
+              {deleteError}
+            </div>
+          )}
+
+          <div className="p-4 rounded-2xl bg-rose-950/20 border border-rose-900/40 text-xs text-rose-300 space-y-2">
+            <p className="font-semibold text-rose-200">
+              Warning: This action is permanent and cannot be undone.
+            </p>
+            <p className="text-rose-300/80">
+              Deleting workspace{" "}
+              <strong className="text-white">"{workspace?.name}"</strong> will permanently delete all associated tasks, team chat messages, and member invitations.
+            </p>
+          </div>
+
+          <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+            <button
+              type="button"
+              disabled={deleteLoading}
+              onClick={() => {
+                setIsDeleteModalOpen(false);
+                setDeleteError("");
+              }}
+              className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-slate-200"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={deleteLoading}
+              onClick={handleDeleteWorkspace}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold transition disabled:opacity-50"
+            >
+              {deleteLoading ? (
+                <LoadingSpinner size="sm" />
+              ) : (
+                <>
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Delete Workspace</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
       </Modal>
     </div>
   );
