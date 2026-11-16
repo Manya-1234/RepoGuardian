@@ -5,7 +5,12 @@ import { ApiResponse } from "../utils/ApiResponse.js";
 import { Project } from "../models/project.model.js";
 import { User } from "../models/user.model.js";
 import { WorkspaceInvitation } from "../models/workspaceInvitation.model.js";
+import { Task } from "../models/task.model.js";
+import { Conversation } from "../models/conversation.model.js";
+import { Message } from "../models/message.model.js";
+import { TeamOpportunity } from "../models/teamOpportunity.model.js";
 import { createAndEmitNotification } from "../utils/notification.helper.js";
+import { getIO } from "../socket/index.js";
 
 const createProject = asyncHandler(async (req, res) => {
     const { name, description, githubRepo } = req.body;
@@ -355,6 +360,21 @@ const updateMemberRole = asyncHandler(async (req, res) => {
         .populate("owner", "username fullName email avatar")
         .populate("members.user", "username fullName email avatar");
 
+    // Send in-app notification to the promoted/demoted user
+    const isNewAdmin = role === "admin";
+    await createAndEmitNotification({
+        recipient: userId,
+        sender: req.user._id,
+        type: "role_updated",
+        title: isNewAdmin
+            ? "Workspace Role Updated: Admin"
+            : "Workspace Role Updated: Member",
+        message: isNewAdmin
+            ? `You are now an Admin in workspace "${project.name}". You can now manage members and Kanban tasks.`
+            : `Your role in workspace "${project.name}" was changed to Member.`,
+        link: `/workspaces/${project._id}?tab=members`
+    });
+
     try {
         const io = getIO();
         io.to(projectId.toString()).emit("workspace_updated", updatedProject);
@@ -390,11 +410,33 @@ const deleteProject = asyncHandler(async (req, res) => {
         throw new ApiError(403, "Only the project owner can delete this project");
     }
 
+    // Cascade deletions for associated workspace data
+    await Task.deleteMany({ project: projectId });
+    await WorkspaceInvitation.deleteMany({ workspace: projectId });
+
+    const conversations = await Conversation.find({ workspace: projectId });
+    for (const convo of conversations) {
+        await Message.deleteMany({ conversation: convo._id });
+        await Conversation.findByIdAndDelete(convo._id);
+    }
+
+    await TeamOpportunity.updateMany(
+        { workspace: projectId },
+        { $set: { workspace: null } }
+    );
+
     await Project.findByIdAndDelete(projectId);
+
+    try {
+        const io = getIO();
+        io.to(projectId.toString()).emit("workspace_deleted", { projectId });
+    } catch {
+        // Non-blocking
+    }
 
     return res
         .status(200)
-        .json(new ApiResponse(200, {}, "Project deleted successfully"));
+        .json(new ApiResponse(200, {}, "Workspace deleted successfully"));
 });
 
 const respondToWorkspaceInvitation = asyncHandler(async (req, res) => {

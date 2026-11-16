@@ -26,7 +26,8 @@ const notificationSchema = new Schema(
                 "new_message",
                 "task_assigned",
                 "task_reassigned",
-                "task_status_changed"
+                "task_status_changed",
+                "role_updated"
             ],
             required: true
         },
