@@ -87,19 +87,28 @@ export const TaskCard = ({
 
       {/* Footer Info: Assignee & Due Date */}
       <div className="flex items-center justify-between pt-3 border-t border-slate-900 text-[11px] text-slate-400">
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 min-w-0">
           {task.assignedTo ? (
-            <img
-              src={
-                task.assignedTo.avatar ||
-                `https://api.dicebear.com/7.x/identicon/svg?seed=${task.assignedTo.username}`
-              }
-              alt={task.assignedTo.username}
-              title={`Assigned to ${task.assignedTo.fullName || task.assignedTo.username}`}
-              className="w-5 h-5 rounded-full object-cover border border-slate-700"
-            />
+            <div
+              className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-slate-900 border border-slate-800 text-[11px] text-slate-300 min-w-0 max-w-[140px]"
+              title={`Assigned to ${task.assignedTo.fullName || task.assignedTo.username} (@${task.assignedTo.username})`}
+            >
+              <img
+                src={
+                  task.assignedTo.avatar ||
+                  `https://api.dicebear.com/7.x/identicon/svg?seed=${task.assignedTo.username}`
+                }
+                alt={task.assignedTo.username}
+                className="w-4 h-4 rounded-full object-cover border border-slate-700 shrink-0"
+              />
+              <span className="truncate text-[10px] font-medium text-slate-300">
+                {task.assignedTo.fullName || task.assignedTo.username}
+              </span>
+            </div>
           ) : (
-            <span className="text-[10px] text-slate-500">Unassigned</span>
+            <span className="text-[10px] text-slate-400 italic px-1.5 py-0.5 rounded bg-slate-900/50">
+              Unassigned
+            </span>
           )}
         </div>
 

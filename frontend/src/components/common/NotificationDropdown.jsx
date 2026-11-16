@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { CheckCheck, Bell, MessageSquare, UserPlus, CheckCircle2 } from "lucide-react";
+import { CheckCheck, Bell, MessageSquare, UserPlus, CheckCircle2, ShieldCheck, XCircle } from "lucide-react";
 import { notificationApi } from "../../api/notification.api";
 import { useSocket } from "../../context/SocketContext";
 import { LoadingSpinner } from "./LoadingSpinner";
@@ -48,15 +48,43 @@ export const NotificationDropdown = ({ onClose }) => {
           const convoId = link.replace("/chat/", "");
           targetLink = `/messages?convo=${convoId}`;
         } else if (link.startsWith("/projects/")) {
-          const projId = link.replace("/projects/", "");
-          targetLink = `/workspaces/${projId}${isMsg ? "?tab=chat" : ""}`;
+          const projId = link.replace("/projects/", "").split("?")[0];
+          if (notification?.type === "role_updated") {
+            targetLink = `/workspaces/${projId}?tab=members`;
+          } else if (
+            notification?.type === "task_assigned" ||
+            notification?.type === "task_reassigned" ||
+            notification?.type === "task_status_changed"
+          ) {
+            targetLink = `/workspaces/${projId}?tab=kanban`;
+          } else {
+            targetLink = `/workspaces/${projId}${isMsg ? "?tab=chat" : ""}`;
+          }
         } else if (link.startsWith("/workspaces/")) {
           if (isMsg && !link.includes("tab=")) {
             targetLink = `${link}${link.includes("?") ? "&" : "?"}tab=chat`;
+          } else if (
+            notification?.type === "role_updated" &&
+            !link.includes("tab=")
+          ) {
+            targetLink = `${link}${link.includes("?") ? "&" : "?"}tab=members`;
+          } else if (
+            (notification?.type === "task_assigned" ||
+              notification?.type === "task_reassigned") &&
+            !link.includes("tab=")
+          ) {
+            targetLink = `${link}${link.includes("?") ? "&" : "?"}tab=kanban`;
           }
         } else if (link.startsWith("/opportunities/")) {
           const oppId = link.replace("/opportunities/", "");
           targetLink = `/opportunities?tab=my&opportunityId=${oppId}`;
+        } else if (
+          notification?.type === "request_accepted" ||
+          notification?.type === "request_rejected"
+        ) {
+          if (!targetLink || targetLink === "/opportunities") {
+            targetLink = "/opportunities?tab=applied";
+          }
         }
         navigate(targetLink);
       }
@@ -81,9 +109,20 @@ export const NotificationDropdown = ({ onClose }) => {
         return <MessageSquare className="w-4 h-4 text-indigo-400" />;
       case "join_request":
       case "invitation":
+      case "workspace_invitation":
         return <UserPlus className="w-4 h-4 text-emerald-400" />;
+      case "request_accepted":
+      case "workspace_invitation_accepted":
+        return <CheckCircle2 className="w-4 h-4 text-emerald-400" />;
+      case "request_rejected":
+      case "workspace_invitation_declined":
+        return <XCircle className="w-4 h-4 text-rose-400" />;
       case "task_assigned":
+      case "task_reassigned":
+      case "task_status_changed":
         return <CheckCircle2 className="w-4 h-4 text-amber-400" />;
+      case "role_updated":
+        return <ShieldCheck className="w-4 h-4 text-amber-400" />;
       default:
         return <Bell className="w-4 h-4 text-sky-400" />;
     }

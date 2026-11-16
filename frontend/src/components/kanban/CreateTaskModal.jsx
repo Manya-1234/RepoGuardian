@@ -158,10 +158,12 @@ export const CreateTaskModal = ({
               className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
             >
               <option value="">Unassigned</option>
-              {members.map((m) => {
+              {members.map((m, idx) => {
                 const u = m.user || m;
+                const uid = (u._id || u.id)?.toString();
+                if (!uid) return null;
                 return (
-                  <option key={u._id} value={u._id}>
+                  <option key={uid || idx} value={uid}>
                     {u.fullName || u.username} (@{u.username})
                   </option>
                 );

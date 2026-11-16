@@ -24,12 +24,14 @@ export const EditTaskModal = ({
 
   useEffect(() => {
     if (task) {
+      const currentAssigneeId =
+        (task.assignedTo?._id || task.assignedTo?.id || task.assignedTo)?.toString() || "";
       setFormData({
         title: task.title || "",
         description: task.description || "",
         status: task.status || "todo",
         priority: task.priority || "medium",
-        assignedTo: task.assignedTo?._id || task.assignedTo || "",
+        assignedTo: currentAssigneeId,
         dueDate: task.dueDate ? task.dueDate.substring(0, 10) : "",
         githubUrl: task.github?.url || task.github?.prUrl || "",
       });
@@ -160,10 +162,12 @@ export const EditTaskModal = ({
               className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
             >
               <option value="">Unassigned</option>
-              {members.map((m) => {
+              {members.map((m, idx) => {
                 const u = m.user || m;
+                const uid = (u._id || u.id)?.toString();
+                if (!uid) return null;
                 return (
-                  <option key={u._id} value={u._id}>
+                  <option key={uid || idx} value={uid}>
                     {u.fullName || u.username} (@{u.username})
                   </option>
                 );
