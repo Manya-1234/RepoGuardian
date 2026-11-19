@@ -39,12 +39,21 @@ export const SocketProvider = ({ children }) => {
 
     const token = localStorage.getItem("accessToken");
     // Connect to backend via proxy or window.location.origin
-    const socketInstance = io({
-      path: "/socket.io",
-      auth: { token },
-      withCredentials: true,
-      transports: ["websocket", "polling"],
-    });
+    // const socketInstance = io({
+    //   path: "/socket.io",
+    //   auth: { token },
+    //   withCredentials: true,
+    //   transports: ["websocket", "polling"],
+    // });
+    const socketInstance = io(
+      import.meta.env.VITE_SOCKET_URL || window.location.origin,
+      {
+        path: "/socket.io",
+        auth: { token },
+        withCredentials: true,
+        transports: ["websocket", "polling"],
+      }
+    );
 
     socketInstance.on("connect", () => {
       // console.log("Socket connected:", socketInstance.id);
