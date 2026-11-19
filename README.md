@@ -2,63 +2,63 @@
 
 **A smarter workspace for collaborative software development.**
 
-RepoGuardian is a developer-focused platform designed to bring project collaboration, codebase understanding, and development workflows together in one place. It aims to help teams understand complex codebases, coordinate their work, and make more informed decisions while building software.
+RepoGuardian is a developer-focused platform that brings team formation, project collaboration, GitHub integration, and codebase intelligence together in one place.
 
-## ✨ Vision
+It helps developers discover potential teammates based on their skills and project requirements, collaborate within shared workspaces, manage development tasks, and gain better visibility into their codebases.
 
-To simplify collaborative software development by connecting people, code, and project workflows through an intelligent and unified workspace.
+## 🚀 Live Demo
 
-## 🚀 Planned Features
+**[Visit RepoGuardian](https://repo-guardian-six.vercel.app/)**
 
-- **Project Workspace** — Organize projects, manage team members, and coordinate development activities.
-- **Task Management** — Create tasks, assign responsibilities, and track progress throughout the development lifecycle.
-- **GitHub Integration** — Connect repositories and gain visibility into commits, branches, and pull requests.
+## ✨ Key Features
+
+- **Developer Discovery & Team Formation** — Discover developers with relevant skills and connect with people looking for teammates for their projects.
+- **Project Opportunities** — Share project opportunities, specify required skills, and connect with suitable collaborators.
+- **Project Workspaces** — Create workspaces and organize project members and development activities.
+- **Task Management** — Create, assign, and track tasks through a Kanban-style workflow.
+- **GitHub Integration** — Connect GitHub repositories and access repository-related information, including commits and collaboration activity.
+- **Real-Time Communication** — Communicate with potential teammates and collaborate through real-time messaging and notifications.
 - **Codebase Intelligence** — Explore code structure and understand relationships between different components.
-- **Change Impact Insights** — Identify potentially affected parts of a codebase and understand why they may require attention.
-- **Team Collaboration** — Keep project discussions and development activities organized in one place.
-- **Actionable Insights** — Connect code analysis with practical development tasks and review workflows.
+- **Change Impact Insights** — Work toward identifying potentially affected files and components when code changes are introduced.
 
 ## 🧰 Technology Stack
 
-| Layer             | Technologies                             |
-| ----------------- | ---------------------------------------- |
-| Frontend          | React, Vite                              |
-| Backend           | Node.js, Express.js                      |
-| Database          | MongoDB                                  |
-| Version Control   | Git, GitHub                              |
-| Integrations      | GitHub API                               |
-| Code Intelligence | Static analysis and AI-assisted analysis |
-
-*The technology stack and feature set may evolve as development progresses.*
+| Layer | Technologies |
+|---|---|
+| Frontend | React, Vite |
+| Backend | Node.js, Express.js |
+| Database | MongoDB Atlas |
+| Real-Time Communication | Socket.IO |
+| Authentication | JWT |
+| Version Control | Git, GitHub |
+| Integrations | GitHub API |
+| Code Intelligence | Static Analysis, AI-Assisted Analysis |
+| Deployment | Vercel, Render |
 
 ## 🏗️ Project Structure
 
 ```text
 RepoGuardian/
-├── backend/       # Server-side application
-├── frontend/      # User interface
-├── README.md
-
+├── backend/          # Backend application
+├── frontend/         # React frontend
+└── README.md         # Project documentation
 ```
 
-## 🎯 Goals
+## 🎯 Project Objectives
 
-- Improve visibility across collaborative development workflows.
-- Make large codebases easier to explore and understand.
-- Help developers assess the potential impact of code changes.
-- Connect technical insights with actionable team tasks.
-- Build a practical, maintainable, and extensible software platform.
+- Make it easier for developers to find compatible teammates.
+- Simplify project organization and team coordination.
+- Improve visibility into repository activity and development progress.
+- Make codebases easier to explore and understand.
+- Connect code-related insights with practical development workflows.
+- Provide a unified environment for team formation and software development.
 
-## 🛣️ Development Roadmap
+## 🛣️ Future Enhancements
 
-- [ ] Project setup and application architecture
-- [ ] Frontend and backend integration
-- [ ] Project and team management
-- [ ] Task tracking and workflow management
-- [ ] GitHub repository integration
-- [ ] Codebase analysis capabilities
-- [ ] Intelligent change-impact insights
-- [ ] Testing, evaluation, and deployment
+- Advanced codebase understanding and dependency analysis.
+- More comprehensive change-impact analysis.
+- Improved AI-assisted development insights.
+- Enhanced repository analysis and collaboration workflows.
 
 ## 👥 Team
 
@@ -66,6 +66,6 @@ Built collaboratively as a software engineering project.
 
 ## 📌 Project Status
 
-**In active development.** Features and architecture are subject to change as the project evolves.
+**Actively developed.**
 
----
+RepoGuardian is an evolving platform, with ongoing improvements to its collaboration workflows, GitHub integration, and codebase intelligence capabilities.
